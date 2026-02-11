@@ -1,3 +1,93 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json"
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
+    "abandonments:recommended",
+    "group:recommended",
+    "replacements:all",
+    "workarounds:all",
+    "mergeConfidence:age-confidence-badges",
+    ":configMigration",
+    ":dependencyDashboard",
+    ":semanticPrefixFixDepsChoreOthers"
+  ],
+  "prHourlyLimit": 30,
+  "prConcurrentLimit": 15,
+  "reviewers": [
+    "josimar-silva"
+  ],
+  "labels": [
+    "automated",
+    "dependencies"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": "after 10pm on sunday"
+  },
+  "packageRules": [
+    {
+      "description": "Go module updates - patch and minor versions",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "labels": [
+        "go-dependencies"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Go module updates - major versions",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "labels": [
+        "go-dependencies",
+        "breaking-changes"
+      ]
+    },
+    {
+      "description": "Go version updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "labels": [
+        "go-version"
+      ],
+      "matchPackageNames": [
+        "/^golang/"
+      ]
+    },
+    {
+      "description": "GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "labels": [
+        "github-actions"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Docker image updates",
+      "matchDatasources": [
+        "docker"
+      ],
+      "labels": [
+        "docker"
+      ]
+    }
+  ]
 }

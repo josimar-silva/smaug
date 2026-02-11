@@ -1,0 +1,92 @@
+name: Docker Build and Push
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  schedule:
+    - cron: "0 03 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 🛡️ Harden the runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: 📦 Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: 🔑 Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Get version from version.go
+        id: get_version
+        run: |
+          VERSION=$(grep '^const Version' cmd/smaug/version.go | cut -d '"' -f 2)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Check if version is SNAPSHOT
+        id: check_snapshot
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          if [[ "$VERSION" == *"-SNAPSHOT"* ]]; then
+            echo "IS_SNAPSHOT=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_SNAPSHOT=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⏰ Get build time and git commit
+        id: build_info
+        run: |
+          BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          GIT_COMMIT=${{ github.sha }}
+          echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "GIT_COMMIT=${GIT_COMMIT}" >> $GITHUB_OUTPUT
+
+      - name: 🐳 Build Docker metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ steps.get_version.outputs.VERSION }}
+            type=raw,value=latest,enable=${{ steps.check_snapshot.outputs.IS_SNAPSHOT == 'false' }}
+            type=sha
+
+      - name: ⚙️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: 🏗️ Build and push production image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.get_version.outputs.VERSION }}
+            BUILD_TIME=${{ steps.build_info.outputs.BUILD_TIME }}
+            GIT_COMMIT=${{ steps.build_info.outputs.GIT_COMMIT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

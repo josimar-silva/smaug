@@ -1,0 +1,160 @@
+name: Continuous Delivery
+
+on:
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-version:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      release_version: ${{ steps.get_version.outputs.VERSION }}
+      is_release: ${{ steps.check_snapshot.outputs.RELEASE }}
+
+    steps:
+      - name: 🛡️ Harden the runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: 📦 Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: '1.25.7'
+
+      - name: 🏷️ Get version from version.go
+        id: get_version
+        run: |
+          VERSION=$(grep '^const Version' cmd/smaug/version.go | cut -d '"' -f 2)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Check if version is SNAPSHOT
+        id: check_snapshot
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          if [[ "$VERSION" == *"-SNAPSHOT"* ]]; then
+            echo "RELEASE=false" >> $GITHUB_OUTPUT
+          else
+            echo "RELEASE=true" >> $GITHUB_OUTPUT
+          fi
+          echo "Release Version: $VERSION"
+
+  release:
+    needs: [fetch-version]
+    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.fetch-version.outputs.is_release == 'true' }}
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      actions: read
+
+    env:
+      RELEASE_VERSION: ${{ needs.fetch-version.outputs.release_version }}
+
+    steps:
+      - name: 🛡️ Harden the runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: 📦 Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: ⬇️ Download binary from CI
+        uses: dawidd6/action-download-artifact@5c98f0b039f36ef966fdb7dfa9779262785ecb05 # v14
+        with:
+          workflow: ci.yaml
+          name: smaug-${{ github.event.workflow_run.head_sha }}
+          path: bin/
+          github_token: ${{ github.token }}
+          run_id: ${{ github.event.workflow_run.id }}
+
+      - name: ✅ Verify binary exists
+        run: |
+          if [ ! -f bin/smaug ]; then
+            echo "Error: Binary not found at bin/smaug"
+            ls -la bin/
+            exit 1
+          fi
+          file bin/smaug
+          bin/smaug --version 2>/dev/null || echo "Note: Binary requires environment setup to test"
+
+      - name: 📦 Create archive
+        run: |
+          cd bin
+          tar -czvf smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz smaug
+          shasum -a 512 smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz > smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz.sha512
+          cd ..
+
+      - name: 📝 Attest release provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: "${{ github.workspace }}/bin/smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz"
+
+      - name: 🛠️ Setup git
+        run: |
+          git config --global user.name "radagastbot[bot]"
+          git config --global user.email "radagastbot[bot]@users.noreply.github.com"
+
+      - name: 🔖 Create Git Tag
+        run: |
+          git tag "v${{ env.RELEASE_VERSION }}" "${{ github.event.workflow_run.head_sha }}"
+          git push origin "v${{ env.RELEASE_VERSION }}"
+
+      - name: 📝 Generate changelog
+        uses: orhun/git-cliff-action@e16f179f0be49ecdfe63753837f20b9531642772 # v4
+        with:
+          config: cliff.toml
+          args: -v --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          files: |
+            bin/smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz
+            bin/smaug-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz.sha512
+          tag_name: v${{ env.RELEASE_VERSION }}
+          name: Release v${{ env.RELEASE_VERSION }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: true
+
+      - name: 🔢 Generate next version
+        run: |
+          MAJOR=$(echo ${{ env.RELEASE_VERSION }} | cut -d. -f1)
+          MINOR=$(echo ${{ env.RELEASE_VERSION }} | cut -d. -f2)
+          PATCH=$(echo ${{ env.RELEASE_VERSION }} | cut -d. -f3)
+          PATCH=$((PATCH + 1))
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH-SNAPSHOT"
+          echo "Next Version will be: ${NEXT_VERSION}"
+          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_ENV
+
+      - name: ⬆️ Increment version
+        run: |
+          sed -i "s/const Version = \".*\"/const Version = \"${{ env.NEXT_VERSION }}\"/" cmd/smaug/version.go
+
+      - name: 📤 Push new version to repo
+        run: |
+          git config user.name "radagastbot[bot]"
+          git config user.email "radagastbot[bot]@users.noreply.github.com"
+          git add cmd/smaug/version.go
+          git commit -m "chore(release): set next SNAPSHOT version"
+          git push

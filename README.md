@@ -16,10 +16,58 @@
   <i>"I am fire. I am... asleep until you need me."</i>
 </p>
 
-<p align="center">
-  <a href="https://github.com/josimar-silva/smaug/blob/main/LICENSE"><img src="https://img.shields.io/github/license/josimar-silva/smaug?style=flat-square&color=blue" alt="License"></a>
+<div align="center"></div>
+
+<div align="center">
+  <!-- MIT License -->
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
+  <!-- Go version -->
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go" alt="Go"></a>
-</p>
+ <!-- Version -->
+  <a href="./">
+    <img src="https://img.shields.io/badge/smaug-v0.1.0-orange.svg" alt="smaug" />
+  </a>
+  <!-- Go Report Card -->
+  <a href="https://goreportcard.com/report/github.com/josimar-silva/smaug">
+    <img src="https://goreportcard.com/badge/github.com/josimar-silva/smaug" alt="smaug go report card" />
+  </a>
+  <!-- OSSF Score Card -->
+  <a href="https://scorecard.dev/viewer/?uri=github.com/josimar-silva/smaug">
+    <img src="https://img.shields.io/ossf-scorecard/github.com/josimar-silva/smaug?label=openssf+scorecard" alt="OpenSSF Score Card">
+  </a>
+  <!-- Coverage -->
+  <a href="https://sonarcloud.io/summary/new_code?id=josimar-silva_smaug">
+    <img src="https://sonarcloud.io/api/project_badges/measure?project=josimar-silva_smaug&metric=coverage" alt="coverage" />
+  </a>
+  <!-- Smaug Health -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/health/badge.svg" alt="smaug Health" />
+  </a>
+  <!-- Smaug Uptime -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/uptimes/30d/badge.svg" alt="smaug Uptime" />
+  </a>
+  <!-- Smaug Response Time -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/response-times/30d/badge.svg" alt="smaug Response Time" />
+  </a>
+  <!-- CD -->
+  <a href="https://github.com/josimar-silva/smaug/actions/workflows/cd.yaml">
+    <img src="https://github.com/josimar-silva/smaug/actions/workflows/cd.yaml/badge.svg" alt="continuous delivery" />
+  </a>
+  <!-- CI -->
+  <a href="https://github.com/josimar-silva/smaug/actions/workflows/ci.yaml">
+    <img src="https://github.com/josimar-silva/smaug/actions/workflows/ci.yaml/badge.svg" alt="continuous integration" />
+  </a>
+  <!-- Docker -->
+  <a href="https://github.com/josimar-silva/smaug/actions/workflows/docker.yaml">
+    <img src="https://github.com/josimar-silva/smaug/actions/workflows/docker.yaml/badge.svg" alt="docker" />
+  </a>
+  <!-- CodeQL Advanced -->
+  <a href="https://github.com/josimar-silva/smaug/actions/workflows/codeql.yaml">
+    <img src="https://github.com/josimar-silva/smaug/actions/workflows/codeql.yaml/badge.svg" alt="CodeQL" />
+  </a>
+</div>
 
 ---
 
@@ -38,7 +86,7 @@ Designed for homelab environments where GPU servers should sleep when idle to re
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
 │   Client    │────────▶│    Smaug    │────────▶│   Backend   │
 └─────────────┘         └──────┬──────┘         └─────────────┘

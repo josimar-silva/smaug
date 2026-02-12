@@ -3,6 +3,10 @@ package main
 
 import "fmt"
 
+func run() string {
+	return "Smaug - Power Aware Reverse Proxy"
+}
+
 func main() {
-	fmt.Println("Smaug - Power Aware Reverse Proxy")
+	fmt.Println(run())
 }

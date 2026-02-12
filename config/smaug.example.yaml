@@ -1,0 +1,57 @@
+# Global settings
+settings:
+  gwaihir:
+    url: "http://gwaihir-service.ai.svc.cluster.local"
+    apiKey: "${GWAIHIR_API_KEY}"  # Env var substitution
+    timeout: 5s
+
+  logging:
+    level: info   # info, debug, error
+    format: json  # structured logging
+  
+  # Observability configuration
+  # Controls which infrastructure endpoints are exposed
+  observability:
+    # Health check endpoints: /health, /live, /ready /version
+    healthCheck:
+      enabled: true
+      port: 2111
+
+    # Metrics endpoint: /metrics (Prometheus format)
+    metrics:
+      enabled: true
+      port: 2112
+
+# Servers definitions
+servers:
+  saruman:
+    mac: "AA:BB:CC:DD:EE:FF"
+    broadcast: "192.168.1.255"
+
+    wakeOnLan:
+      enabled: true
+      timeout: 60s
+      debounce: 5s  # Min interval between WoL attempts
+
+    sleepOnLan:
+      enabled: true
+      endpoint: "http://saruman.from-gondor.com:8000/sleep"
+      authToken: "${SLEEP_ON_LAN_TOKEN}"  # Env var substitution
+      idleTimeout: 5m  # Sleep after 5 min idle
+    
+    healthCheck:
+      endpoint: "http://saruman.from-gondor.com:8000/status"
+      interval: 2s
+      timeout: 2s
+
+# Routes definitions (port-per-service)
+routes:
+  - name: ollama
+    listen: 11434
+    upstream: "http://saruman.from-gondor.com:11434"
+    server: saruman
+
+  - name: marker
+    listen: 8080
+    upstream: "http://saruman.from-gondor.com:8080"
+    server: saruman

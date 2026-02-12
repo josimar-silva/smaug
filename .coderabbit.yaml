@@ -1,0 +1,161 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+
+# CodeRabbit Configuration Template
+# Complete reference: https://docs.coderabbit.ai/reference/configuration
+# Copy this file to .coderabbit.yaml in your repository root
+
+# =============================================================================
+# GLOBAL SETTINGS
+# These settings apply to your entire CodeRabbit configuration
+# =============================================================================
+language: "en-US"
+
+tone_instructions: "You are Gandalf, the Sage Code Reviewer"
+
+early_access: true
+
+enable_free_tier: true
+
+# =============================================================================
+# REVIEWS
+# Settings related to reviews.
+# =============================================================================
+reviews:
+  profile: "assertive"
+
+  # Approve the review once CodeRabbit’s comments are resolved and no pre-merge checks are in an error state. Note: In GitLab, all discussions must be resolved.
+  # Default: false
+  request_changes_workflow: true
+
+  # Generate a summary of the changed files in the walkthrough.
+  # Default: true
+  changed_files_summary: false
+
+  # Generate sequence diagrams in the walkthrough.
+  # Default: true
+  sequence_diagrams: true
+
+  # Estimate the code review effort in the walkthrough.
+  # Default: true
+  estimate_code_review_effort: false
+
+  # Include possibly related issues in the walkthrough.
+  # Default: true
+  related_issues: false
+
+  # Suggest labels based on the changes in the pull request in the walkthrough.
+  # Default: true
+  suggested_labels: false
+
+  # Suggest reviewers based on the changes in the pull request in the walkthrough.
+  # Default: true
+  suggested_reviewers: false
+
+  # Generate a poem in the walkthrough comment.
+  # Default: true
+  poem: false
+
+  # Specify file patterns to include or exclude in a review using glob patterns (e.g., !dist/**, src/**). These patterns also apply to 'git sparse-checkout', including specified patterns and ignoring excluded ones (starting with '!') when cloning the repository.
+  # Default: []
+  path_filters: [
+    "!vendor/**/*",
+    "!**/*_test.go",
+    "!coverage.html",
+    "!coverage.out"
+  ]
+
+  # Path Instructions - Provide specific additional guidelines for code review based on file paths.
+  # Default: []
+  path_instructions: []
+
+  # Configuration for auto review
+  auto_review:
+    enabled: true
+    labels: [
+      "!automated",
+      "!dev-dependencies"
+    ]
+    ignore_usernames: [
+      radagastbot
+    ]
+
+  # Configuration for finishing touches
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: true
+
+  # Configuration for pre merge checks
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+    issue_assessment:
+      mode: "off"
+
+  # Tools that provide additional context to code reviews.
+  tools:
+    shellcheck:
+      enabled: true
+
+    markdownlint:
+      enabled: true
+
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+
+    yamllint:
+      enabled: true
+
+    gitleaks:
+      enabled: true
+
+    golangci-lint:
+      enabled: true
+
+    actionlint:
+      enabled: true
+
+    semgrep:
+      enabled: true
+
+# =============================================================================
+# CHAT
+# Configuration for chat
+# =============================================================================
+chat:
+  art: true
+
+  auto_reply: true
+
+  integrations:
+    jira:
+      usage: "disabled"
+
+# =============================================================================
+# KNOWLEDGE BASE
+# Configuration for knowledge base
+# =============================================================================
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: "global"
+  jira:
+    usage: "disabled"
+
+# =============================================================================
+# CODE GENERATION
+# Configuration for code generation
+# =============================================================================
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "**/*_test.go"
+        instructions: "Unit tests should follow table-driven test pattern where appropriate, use testify/assert for assertions, follow Arrange-Act-Assert pattern, and include meaningful test names that describe the scenario being tested"
+      - path: "internal/**/*.go"
+        instructions: "Focus on testing business logic and edge cases, mock external dependencies using interfaces, ensure proper error handling is tested"

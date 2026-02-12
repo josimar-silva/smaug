@@ -186,13 +186,22 @@ settings:
     apiKey: "${GWAIHIR_API_KEY}"  # Env var substitution
     timeout: 5s
 
-  metrics:
-    enabled: true
-    port: 2112
-
   logging:
     level: info
     format: json  # structured logging
+  
+  # Observability configuration
+  # Controls which infrastructure endpoints are exposed
+  observability:
+    # Health check endpoints: /health, /live, /ready /version
+    healthCheck:
+      enabled: true
+      port: 2111
+
+    # Metrics endpoint: /metrics (Prometheus format)
+    metrics:
+      enabled: true
+      port: 2112
 
 # Server definitions
 servers:

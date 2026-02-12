@@ -156,6 +156,6 @@ code_generation:
   unit_tests:
     path_instructions:
       - path: "**/*_test.go"
-        instructions: "Unit tests should follow table-driven test pattern where appropriate, use testify/assert for assertions, follow Arrange-Act-Assert pattern, and include meaningful test names that describe the scenario being tested"
+        instructions: "Unit tests should follow table-driven test pattern where appropriate, use testify/assert for assertions, follow Given-When-Then pattern, and include meaningful test names that describe the scenario being tested"
       - path: "internal/**/*.go"
         instructions: "Focus on testing business logic and edge cases, mock external dependencies using interfaces, ensure proper error handling is tested"

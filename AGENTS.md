@@ -193,11 +193,11 @@ Treat test code with the same rigor as production code:
 
 ### Test Structure
 
-Follow the **Arrange-Act-Assert** pattern:
+Follow the **Given-When-Then** pattern:
 
 ```go
 func TestWoLUseCase_SendWoLPacket_Success(t *testing.T) {
-    // Arrange: Set up test dependencies and data
+    // Given: Set up test dependencies and data
     ctx := context.Background()
     machineID := "gandalf"
     mockRepo := &MockMachineRepository{
@@ -215,10 +215,10 @@ func TestWoLUseCase_SendWoLPacket_Success(t *testing.T) {
     mockSender := &MockWoLPacketSender{}
     useCase := NewWoLUseCase(mockRepo, mockSender, logger, metrics)
 
-    // Act: Execute the function being tested
+    // When: Execute the function being tested
     err := useCase.SendWoLPacket(ctx, machineID)
 
-    // Assert: Verify results and side effects
+    // Then: Verify results and side effects
     assert.NoError(t, err)
     assert.Equal(t, 1, mockSender.SendCallCount())
     assert.Equal(t, "AA:BB:CC:DD:EE:FF", mockSender.LastMAC())

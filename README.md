@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://github.com/josimar-silva/smaug/blob/main/LICENSE"><img src="https://img.shields.io/github/license/josimar-silva/smaug?style=flat-square&color=blue" alt="License"></a>
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.23-00ADD8?style=flat-square&logo=go" alt="Go"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go" alt="Go"></a>
 </p>
 
 ---

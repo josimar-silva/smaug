@@ -6,8 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
 
 func TestRecoveryMiddleware(t *testing.T) {

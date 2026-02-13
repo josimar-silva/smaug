@@ -13,8 +13,13 @@ import (
 //
 // The function performs the following steps:
 // 1. Reads the file from the filesystem
-// 2. Parses the YAML content into the Config struct
-// 3. Returns the populated Config or an error with context
+// 2. Applies environment variable substitution to the file content
+// 3. Parses the YAML content into the Config struct
+// 4. Returns the populated Config or an error with context
+//
+// Environment variable substitution supports:
+// - ${VAR_NAME} - Replaced with the value of VAR_NAME, or empty string if not set
+// - ${VAR_NAME:-default} - Replaced with VAR_NAME value, or default if VAR_NAME not set
 //
 // Error cases:
 // - File does not exist or cannot be read: returns "failed to read config file" error
@@ -27,9 +32,12 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
 
+	// Apply environment variable substitution
+	content := SubstituteEnv(string(data))
+
 	// Parse the YAML content
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := yaml.Unmarshal([]byte(content), &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", path, err)
 	}
 

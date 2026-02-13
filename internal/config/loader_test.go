@@ -267,6 +267,236 @@ func aValidConfigFor(t *testing.T) *Config {
 	return config
 }
 
+func TestLoadWithEnvironmentVariableSubstitution(t *testing.T) {
+	// Given: A config file with environment variable references
+	t.Setenv("GWAIHIR_API_KEY", "env-api-key-123")
+	t.Setenv("GWAIHIR_URL", "http://gwaihir.example.com")
+
+	configWithVars := `settings:
+  gwaihir:
+    url: "${GWAIHIR_URL}"
+    apiKey: "${GWAIHIR_API_KEY}"
+    timeout: 5s
+
+  logging:
+    level: info
+    format: json
+
+  observability:
+    healthCheck:
+      enabled: true
+      port: 2111
+    metrics:
+      enabled: true
+      port: 2112
+
+servers:
+  saruman:
+    mac: "AA:BB:CC:DD:EE:FF"
+    broadcast: "192.168.1.255"
+    wakeOnLan:
+      enabled: true
+      timeout: 60s
+      debounce: 5s
+    sleepOnLan:
+      enabled: false
+    healthCheck:
+      endpoint: "http://saruman.example.com:8000/status"
+      interval: 2s
+      timeout: 2s
+
+routes: []
+`
+
+	tmpFile := createTempConfigFile(t, configWithVars)
+	defer func() {
+		_ = os.Remove(tmpFile)
+	}()
+
+	// When: Loading the config
+	config, err := Load(tmpFile)
+
+	// Then: Environment variables are substituted in nested fields
+	require.NoError(t, err, "Load should succeed with env var substitution")
+	require.NotNil(t, config)
+	assert.Equal(t, "http://gwaihir.example.com", config.Settings.Gwaihir.URL)
+	assert.Equal(t, "env-api-key-123", config.Settings.Gwaihir.APIKey.Value())
+}
+
+func TestLoadWithEnvironmentVariableDefaultValues(t *testing.T) {
+	// Given: A config file with default values for missing environment variables
+	configWithDefaults := `settings:
+  gwaihir:
+    url: "${MISSING_GWAIHIR_URL:-http://localhost:8000}"
+    apiKey: "${MISSING_GWAIHIR_KEY:-default-key}"
+    timeout: 5s
+
+  logging:
+    level: info
+    format: json
+
+  observability:
+    healthCheck:
+      enabled: true
+      port: 2111
+    metrics:
+      enabled: true
+      port: 2112
+
+servers:
+  saruman:
+    mac: "AA:BB:CC:DD:EE:FF"
+    broadcast: "192.168.1.255"
+    wakeOnLan:
+      enabled: true
+      timeout: 60s
+      debounce: 5s
+    sleepOnLan:
+      enabled: false
+    healthCheck:
+      endpoint: "http://saruman.example.com:8000/status"
+      interval: 2s
+      timeout: 2s
+
+routes: []
+`
+
+	tmpFile := createTempConfigFile(t, configWithDefaults)
+	defer func() {
+		_ = os.Remove(tmpFile)
+	}()
+
+	// When: Loading the config with missing environment variables
+	config, err := Load(tmpFile)
+
+	// Then: Default values are used for missing variables
+	require.NoError(t, err, "Load should succeed with default values")
+	require.NotNil(t, config)
+	assert.Equal(t, "http://localhost:8000", config.Settings.Gwaihir.URL)
+	assert.Equal(t, "default-key", config.Settings.Gwaihir.APIKey.Value())
+}
+
+func TestLoadWithMixedEnvironmentVariables(t *testing.T) {
+	// Given: A config with some vars set and some missing (using defaults)
+	t.Setenv("SERVER_MAC", "11:22:33:44:55:66")
+
+	configMixed := `settings:
+  gwaihir:
+    url: "${MISSING_URL:-http://default.local}"
+    apiKey: "static-key"
+    timeout: 5s
+
+  logging:
+    level: info
+    format: json
+
+  observability:
+    healthCheck:
+      enabled: true
+      port: 2111
+    metrics:
+      enabled: true
+      port: 2112
+
+servers:
+  server1:
+    mac: "${SERVER_MAC}"
+    broadcast: "${BROADCAST:-192.168.1.255}"
+    wakeOnLan:
+      enabled: true
+      timeout: 60s
+      debounce: 5s
+    sleepOnLan:
+      enabled: false
+    healthCheck:
+      endpoint: "http://server.example.com:8000/status"
+      interval: 2s
+      timeout: 2s
+
+routes: []
+`
+
+	tmpFile := createTempConfigFile(t, configMixed)
+	defer func() {
+		_ = os.Remove(tmpFile)
+	}()
+
+	// When: Loading the config
+	config, err := Load(tmpFile)
+
+	// Then: Mix of env vars and defaults are applied correctly
+	require.NoError(t, err, "Load should succeed with mixed env vars")
+	require.NotNil(t, config)
+	require.Contains(t, config.Servers, "server1")
+	server := config.Servers["server1"]
+	assert.Equal(t, "11:22:33:44:55:66", server.MAC)
+	assert.Equal(t, "192.168.1.255", server.Broadcast)
+	assert.Equal(t, "http://default.local", config.Settings.Gwaihir.URL)
+}
+
+func TestLoadSubstitutionInMultipleNestedLevels(t *testing.T) {
+	// Given: A config with environment variables in deeply nested fields
+	t.Setenv("SLEEP_ENDPOINT", "http://sleep.example.com/api")
+	t.Setenv("SLEEP_TOKEN", "secret-sleep-token")
+	t.Setenv("HEALTH_ENDPOINT", "http://health.example.com/check")
+
+	configNested := `settings:
+  gwaihir:
+    url: "http://localhost"
+    apiKey: "key"
+    timeout: 5s
+
+  logging:
+    level: info
+    format: json
+
+  observability:
+    healthCheck:
+      enabled: true
+      port: 2111
+    metrics:
+      enabled: true
+      port: 2112
+
+servers:
+  server1:
+    mac: "AA:BB:CC:DD:EE:FF"
+    broadcast: "192.168.1.255"
+    wakeOnLan:
+      enabled: true
+      timeout: 60s
+      debounce: 5s
+    sleepOnLan:
+      enabled: true
+      endpoint: "${SLEEP_ENDPOINT}"
+      authToken: "${SLEEP_TOKEN}"
+      idleTimeout: 5m
+    healthCheck:
+      endpoint: "${HEALTH_ENDPOINT}"
+      interval: 2s
+      timeout: 2s
+
+routes: []
+`
+
+	tmpFile := createTempConfigFile(t, configNested)
+	defer func() {
+		_ = os.Remove(tmpFile)
+	}()
+
+	// When: Loading the config
+	config, err := Load(tmpFile)
+
+	// Then: Substitution works at multiple nesting levels
+	require.NoError(t, err, "Load should succeed with nested substitution")
+	require.NotNil(t, config)
+	require.Contains(t, config.Servers, "server1")
+	server := config.Servers["server1"]
+	assert.Equal(t, "http://sleep.example.com/api", server.SleepOnLan.Endpoint)
+	assert.Equal(t, "secret-sleep-token", server.SleepOnLan.AuthToken.Value())
+	assert.Equal(t, "http://health.example.com/check", server.HealthCheck.Endpoint)
+}
+
 func createTempConfigFile(t *testing.T, content string) string {
 	t.Helper()
 

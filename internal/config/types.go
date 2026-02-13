@@ -1,10 +1,14 @@
 package config
 
-import "time"
+import (
+	"log/slog"
+
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Config represents the root configuration structure for SMAUG.
-// It defines all configuration options for the reverse proxy including
-// settings, routes, and servers.
 type Config struct {
 	Settings SettingsConfig    `yaml:"settings"`
 	Servers  map[string]Server `yaml:"servers"`
@@ -21,7 +25,7 @@ type SettingsConfig struct {
 // GwaihirConfig defines configuration for the Gwaihir WoL service.
 type GwaihirConfig struct {
 	URL     string        `yaml:"url"`
-	APIKey  string        `yaml:"apiKey"`
+	APIKey  SecretString  `yaml:"apiKey"`
 	Timeout time.Duration `yaml:"timeout"`
 }
 
@@ -69,7 +73,7 @@ type WakeOnLanConfig struct {
 type SleepOnLanConfig struct {
 	Enabled     bool          `yaml:"enabled"`
 	Endpoint    string        `yaml:"endpoint"`
-	AuthToken   string        `yaml:"authToken"`
+	AuthToken   SecretString  `yaml:"authToken"`
 	IdleTimeout time.Duration `yaml:"idleTimeout"` // Sleep after idle timeout
 }
 
@@ -86,4 +90,42 @@ type Route struct {
 	Listen   int    `yaml:"listen"`   // The port to listen on
 	Upstream string `yaml:"upstream"` // The target backend URL
 	Server   string `yaml:"server"`   // The server name to associate with this route
+}
+
+// SecretString is a string wrapper that redacts its value in logs, text
+// marshalling, and string representations to prevent accidental exposure
+// of sensitive configuration values such as API keys and auth tokens.
+type SecretString struct {
+	value string
+}
+
+// String returns a redacted placeholder if the value is set, or an empty
+// string if unset. It implements the fmt.Stringer interface.
+func (s SecretString) String() string {
+	if s.value == "" {
+		return ""
+	}
+	return "***REDACTED***"
+}
+
+// MarshalText returns the redacted representation, ensuring secrets are
+// not leaked during text or JSON marshalling. It implements encoding.TextMarshaler.
+func (s SecretString) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
+// LogValue returns a redacted slog.Value for use with structured logging.
+// It implements the slog.LogValuer interface.
+func (s SecretString) LogValue() slog.Value {
+	return slog.StringValue(s.String())
+}
+
+// Value returns the underlying plaintext secret. Use with care.
+func (s SecretString) Value() string {
+	return s.value
+}
+
+// UnmarshalYAML populates the SecretString from a YAML node.
+func (s *SecretString) UnmarshalYAML(value *yaml.Node) error {
+	return value.Decode(&s.value)
 }

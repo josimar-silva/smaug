@@ -3,7 +3,6 @@ package middleware
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,15 +11,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
 
-func TestStructuredLogging_LogsRequestAndResponse(t *testing.T) {
-	// Given: A logger capturing JSON output
-	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
+// newTestLogger creates a logger for testing that writes to the provided buffer.
+func newTestLogger(buf *bytes.Buffer) *logger.Logger {
+	return logger.New(logger.LevelInfo, logger.JSON, buf)
+}
 
-	// Given: A backend handler that returns success
+func TestLoggingMiddlewareLogsRequestAndResponse(t *testing.T) {
+	var logBuffer bytes.Buffer
+	log := newTestLogger(&logBuffer)
+
 	backendCalled := false
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendCalled = true
@@ -28,8 +31,7 @@ func TestStructuredLogging_LogsRequestAndResponse(t *testing.T) {
 		_, _ = w.Write([]byte("success"))
 	})
 
-	// When: Request passes through logging middleware
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -38,26 +40,22 @@ func TestStructuredLogging_LogsRequestAndResponse(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Backend is called and logging occurred
 	assert.True(t, backendCalled)
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, logBuffer.String(), "request")
 	assert.Contains(t, logBuffer.String(), "response")
 }
 
-func TestStructuredLogging_IncludesRequestDetails(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareIncludesRequestDetails(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request passes through with specific details
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -67,7 +65,6 @@ func TestStructuredLogging_IncludesRequestDetails(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Logged data contains request details
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "method")
 	assert.Contains(t, logOutput, "POST")
@@ -79,21 +76,18 @@ func TestStructuredLogging_IncludesRequestDetails(t *testing.T) {
 	assert.Contains(t, logOutput, "10.0.0.1")
 }
 
-func TestStructuredLogging_IncludesResponseDetails(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareIncludesResponseDetails(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler that returns specific status
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Custom-Header", "custom-value")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("created"))
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -101,7 +95,6 @@ func TestStructuredLogging_IncludesResponseDetails(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Response details are logged
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "status")
 	assert.Contains(t, logOutput, "201")
@@ -109,19 +102,16 @@ func TestStructuredLogging_IncludesResponseDetails(t *testing.T) {
 	assert.Contains(t, logOutput, "response_bytes")
 }
 
-func TestStructuredLogging_IncludesRequestID(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareIncludesRequestID(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -129,30 +119,25 @@ func TestStructuredLogging_IncludesRequestID(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Request ID is generated and logged
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "request_id")
 }
 
-func TestStructuredLogging_PreservesContext(t *testing.T) {
-	// Given: A logger and a request with context values
+func TestLoggingMiddlewarePreservesContext(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A context key type
+	log := newTestLogger(&logBuffer)
+
 	type contextKey string
 	const testKey contextKey = "test_key"
 
-	// Given: A backend that reads context values
 	contextValue := ""
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		contextValue = r.Context().Value(testKey).(string)
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request passes through with context
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -161,24 +146,20 @@ func TestStructuredLogging_PreservesContext(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Context is preserved
 	assert.Equal(t, "test_value", contextValue)
 }
 
-func TestStructuredLogging_HandlesErrors(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareHandlesErrors(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler that returns error status
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("error occurred"))
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -186,27 +167,23 @@ func TestStructuredLogging_HandlesErrors(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Error status is logged
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "status")
 	assert.Contains(t, logOutput, "500")
 }
 
-func TestStructuredLogging_HandlerFunc(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareHandlerFunc(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler function (not http.Handler)
+	log := newTestLogger(&logBuffer)
+
 	backendCalled := false
 	backendFunc := func(w http.ResponseWriter, r *http.Request) {
 		backendCalled = true
 		w.WriteHeader(http.StatusOK)
 	}
 
-	// When: Wrapping HandlerFunc directly
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(http.HandlerFunc(backendFunc))
 
 	recorder := httptest.NewRecorder()
@@ -214,26 +191,22 @@ func TestStructuredLogging_HandlerFunc(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Backend is called and logging occurred
 	assert.True(t, backendCalled)
 	assert.NotEmpty(t, logBuffer.String())
 }
 
-func TestStructuredLogging_CapturesResponseBytes(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareCapturesResponseBytes(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend that returns a specific response body
+	log := newTestLogger(&logBuffer)
+
 	responseBody := "this is the response"
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(responseBody))
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -241,27 +214,23 @@ func TestStructuredLogging_CapturesResponseBytes(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Response byte count is logged correctly
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "response_bytes")
 	// Response body length is 19 bytes
 	assert.Contains(t, logOutput, "19")
 }
 
-func TestStructuredLogging_DurationReasonable(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareDurationReasonable(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler with a small delay
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -269,26 +238,22 @@ func TestStructuredLogging_DurationReasonable(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Duration is logged and is at least the sleep duration
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "duration")
 	// Duration should be present in the log
 	assert.True(t, len(logOutput) > 0)
 }
 
-func TestStructuredLogging_MultipleRequests_UniqueIDs(t *testing.T) {
-	// Given: A logger
+func TestLoggingMiddlewareMultipleRequestsUniqueIDs(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Multiple requests pass through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	for i := 0; i < 3; i++ {
@@ -297,26 +262,22 @@ func TestStructuredLogging_MultipleRequests_UniqueIDs(t *testing.T) {
 		wrapped.ServeHTTP(recorder, request)
 	}
 
-	// Then: Each request and response has a request_id logged (2 per request)
 	logOutput := logBuffer.String()
 	requestIDCount := strings.Count(logOutput, "request_id")
 	// 3 requests × 2 logs per request (request + response) = 6 occurrences
 	assert.Equal(t, 6, requestIDCount)
 }
 
-func TestStructuredLogging_WithQueryString(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareWithQueryString(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request has query parameters
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -324,7 +285,6 @@ func TestStructuredLogging_WithQueryString(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Query string is captured
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "query")
 	assert.Contains(t, logOutput, "q=test")
@@ -332,7 +292,7 @@ func TestStructuredLogging_WithQueryString(t *testing.T) {
 	assert.Contains(t, logOutput, "page=1")
 }
 
-func TestStructuredLogging_WithDifferentMethods(t *testing.T) {
+func TestLoggingMiddlewareWithDifferentMethods(t *testing.T) {
 	tests := []struct {
 		name   string
 		method string
@@ -348,8 +308,8 @@ func TestStructuredLogging_WithDifferentMethods(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Given: A logger capturing JSON output
 			var logBuffer bytes.Buffer
-			handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-			logger := slog.New(handler)
+
+			log := newTestLogger(&logBuffer)
 
 			// Given: A backend handler
 			backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +317,7 @@ func TestStructuredLogging_WithDifferentMethods(t *testing.T) {
 			})
 
 			// When: Request with specific method passes through
-			middleware := NewLoggingMiddleware(logger)
+			middleware := NewLoggingMiddleware(log)
 			wrapped := middleware(backend)
 
 			recorder := httptest.NewRecorder()
@@ -372,13 +332,11 @@ func TestStructuredLogging_WithDifferentMethods(t *testing.T) {
 	}
 }
 
-func TestStructuredLogging_WrapsResponseWriter(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareWrapsResponseWriter(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend that writes response in multiple parts
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("part1"))
@@ -386,8 +344,7 @@ func TestStructuredLogging_WrapsResponseWriter(t *testing.T) {
 		_, _ = w.Write([]byte("part3"))
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -395,26 +352,22 @@ func TestStructuredLogging_WrapsResponseWriter(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Total response bytes are counted correctly
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "response_bytes")
 	// part1 + part2 + part3 = 15 bytes
 	assert.Contains(t, logOutput, "15")
 }
 
-func TestStructuredLogging_ClientIPFromRemoteAddr(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareClientIPFromRemoteAddr(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request has RemoteAddr with port
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -423,26 +376,22 @@ func TestStructuredLogging_ClientIPFromRemoteAddr(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Client IP is extracted correctly (without port)
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "client_ip")
 	assert.Contains(t, logOutput, "203.0.113.42")
 	assert.NotContains(t, logOutput, "12345")
 }
 
-func TestStructuredLogging_EmptyPath(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareEmptyPath(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request to root path
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -450,27 +399,23 @@ func TestStructuredLogging_EmptyPath(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Path is logged correctly
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "path")
 	assert.Contains(t, logOutput, "/")
 }
 
-func TestStructuredLogging_HeaderPreservation(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareHeaderPreservation(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend that checks headers
+	log := newTestLogger(&logBuffer)
+
 	receivedHeaders := make(map[string]string)
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHeaders["Content-Type"] = r.Header.Get("Content-Type")
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request with headers passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -479,30 +424,23 @@ func TestStructuredLogging_HeaderPreservation(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Headers are preserved
 	assert.Equal(t, "application/json", receivedHeaders["Content-Type"])
 }
 
-func TestStructuredLogging_ChainMiddleware(t *testing.T) {
-	// Given: Two loggers
+func TestLoggingMiddlewareChainMiddleware(t *testing.T) {
 	var log1Buffer bytes.Buffer
-	handler1 := slog.NewJSONHandler(&log1Buffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger1 := slog.New(handler1)
+	log1 := newTestLogger(&log1Buffer)
 
 	var log2Buffer bytes.Buffer
-	handler2 := slog.NewJSONHandler(&log2Buffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger2 := slog.New(handler2)
+	log2 := newTestLogger(&log2Buffer)
 
-	// Given: Two logging middleware
-	middleware1 := NewLoggingMiddleware(logger1)
-	middleware2 := NewLoggingMiddleware(logger2)
+	middleware1 := NewLoggingMiddleware(log1)
+	middleware2 := NewLoggingMiddleware(log2)
 
-	// Given: A backend handler
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Chain middleware together
 	chained := Chain(middleware1, middleware2)(backend)
 
 	recorder := httptest.NewRecorder()
@@ -510,22 +448,19 @@ func TestStructuredLogging_ChainMiddleware(t *testing.T) {
 
 	chained.ServeHTTP(recorder, request)
 
-	// Then: Both middleware log the request/response
 	assert.Contains(t, log1Buffer.String(), "request")
 	assert.Contains(t, log2Buffer.String(), "request")
 	assert.Contains(t, log1Buffer.String(), "response")
 	assert.Contains(t, log2Buffer.String(), "response")
 }
 
-func TestStructuredLogging_ChainEmptyMiddleware(t *testing.T) {
-	// Given: A backend handler
+func TestLoggingMiddlewareChainEmptyMiddleware(t *testing.T) {
 	backendCalled := false
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendCalled = true
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Chain with empty middleware list
 	chained := Chain()(backend)
 
 	recorder := httptest.NewRecorder()
@@ -533,12 +468,10 @@ func TestStructuredLogging_ChainEmptyMiddleware(t *testing.T) {
 
 	chained.ServeHTTP(recorder, request)
 
-	// Then: Backend is still called
 	assert.True(t, backendCalled)
 }
 
-func TestStructuredLogging_ChainOrderMatters(t *testing.T) {
-	// Given: Two loggers capturing execution order
+func TestLoggingMiddlewareChainOrderMatters(t *testing.T) {
 	var order []string
 	orderMutex := &sync.Mutex{}
 
@@ -558,12 +491,10 @@ func TestStructuredLogging_ChainOrderMatters(t *testing.T) {
 		}
 	}
 
-	// Given: A backend handler
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Chain middleware in specific order
 	chained := Chain(recordOrder("first"), recordOrder("second"))(backend)
 
 	recorder := httptest.NewRecorder()
@@ -571,7 +502,6 @@ func TestStructuredLogging_ChainOrderMatters(t *testing.T) {
 
 	chained.ServeHTTP(recorder, request)
 
-	// Then: Execution order shows first middleware is outermost
 	// Order should be: first_before, second_before, [backend], second_after, first_after
 	assert.Equal(t, []string{
 		"first_before",
@@ -581,19 +511,16 @@ func TestStructuredLogging_ChainOrderMatters(t *testing.T) {
 	}, order)
 }
 
-func TestStructuredLogging_ClientIPWithoutPort(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareClientIPWithoutPort(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request has RemoteAddr without port (edge case)
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -602,24 +529,20 @@ func TestStructuredLogging_ClientIPWithoutPort(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Client IP is used as-is
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "192.168.1.50")
 }
 
-func TestStructuredLogging_ClientIPWithInvalidPort(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareClientIPWithInvalidPort(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend handler
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// When: Request has RemoteAddr with invalid port format
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -629,24 +552,20 @@ func TestStructuredLogging_ClientIPWithInvalidPort(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Original RemoteAddr is used when parsing fails
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "client_ip")
 }
 
-func TestStructuredLogging_InfiniteResponseWriter(t *testing.T) {
-	// Given: A logger capturing JSON output
+func TestLoggingMiddlewareInfiniteResponseWriter(t *testing.T) {
 	var logBuffer bytes.Buffer
-	handler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})
-	logger := slog.New(handler)
 
-	// Given: A backend that never calls WriteHeader explicitly (defaults to 200)
+	log := newTestLogger(&logBuffer)
+
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("implicit ok"))
 	})
 
-	// When: Request passes through
-	middleware := NewLoggingMiddleware(logger)
+	middleware := NewLoggingMiddleware(log)
 	wrapped := middleware(backend)
 
 	recorder := httptest.NewRecorder()
@@ -654,7 +573,6 @@ func TestStructuredLogging_InfiniteResponseWriter(t *testing.T) {
 
 	wrapped.ServeHTTP(recorder, request)
 
-	// Then: Default status 200 is logged
 	logOutput := logBuffer.String()
 	assert.Contains(t, logOutput, "200")
 	assert.Contains(t, logOutput, "response_bytes")

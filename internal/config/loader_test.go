@@ -223,6 +223,38 @@ func TestLoadFileNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to read", "Error message should indicate read failure")
 }
 
+func TestLoadValidationFailure(t *testing.T) {
+	invalidConfigYAML := `settings:
+  gwaihir:
+    url: "invalid-url"
+    timeout: -5s
+  observability:
+    healthCheck:
+      enabled: true
+      port: 0
+
+servers:
+  server1:
+    mac: "invalid-mac"
+    broadcast: "999.999.999.999"
+
+routes:
+  - name: ""
+    listen: 99999
+    upstream: "not-a-url"
+`
+	tmpFile := createTempConfigFile(t, invalidConfigYAML)
+	defer func() {
+		_ = os.Remove(tmpFile)
+	}()
+
+	config, err := Load(tmpFile)
+
+	assert.Error(t, err, "Load should return an error for invalid config")
+	assert.Nil(t, config, "Config should be nil when validation fails")
+	assert.Contains(t, err.Error(), "config validation failed", "Error message should indicate validation failure")
+}
+
 func aValidConfigFor(t *testing.T) *Config {
 	tmpFile := createTempConfigFile(t, validConfigYAML)
 	defer func() {

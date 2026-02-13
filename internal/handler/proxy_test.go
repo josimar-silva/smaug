@@ -6,9 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
 
 func newTestLogger() *logger.Logger {

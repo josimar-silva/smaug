@@ -101,6 +101,51 @@ jobs:
           name: test-coverage
           path: coverage.out
 
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 🛡️ Harden the runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: 📦 Checkout
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: ⚒️ Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+        with:
+          just-version: "1.40.0"
+
+      - name: ⚙️ Install dependencies
+        run: just ci
+
+      - name: 📊 Run benchmarks
+        run: just benchmark
+
+      - name: ⬆️ Upload benchmark results
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-24.04
@@ -142,7 +187,7 @@ jobs:
         run: go test -v -tags=integration -run TestIntegration ./tests/...
 
   build:
-    needs: [test, integration-test, check]
+    needs: [test, integration-test, check, benchmark]
     name: Build
     runs-on: ubuntu-24.04
     steps:

@@ -48,6 +48,9 @@ test-fast:
 test-integration:
     go test -v -tags=integration -run TestIntegration ./tests/...
 
+benchmark:
+    go test -v -bench=. -benchmem ./... 2>&1 | tee benchmark-results.txt
+
 # Build the binary
 build:
     go build -o bin/smaug -ldflags="-s -w" ./cmd/smaug

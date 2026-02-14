@@ -3,7 +3,7 @@ settings:
   # Logging configuration
   logging:
     level: info   # info, debug, error
-    format: json  # structured logging
+    format: text  # structured logging
 
   # Gwaihir configuration (https://github.com/josimar-silva/gwaihir)
   gwaihir:
@@ -27,6 +27,8 @@ settings:
 # Servers definitions
 servers:
   saruman: # Unique server name
+    mac: "00:11:22:33:44:55"  # MAC address for WoL
+    broadcast: "192.168.68.255"  # Broadcast IP for WoL
     
     wakeOnLan: # WoL configuration
       enabled: true

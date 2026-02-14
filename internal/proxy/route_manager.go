@@ -3,11 +3,13 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/config"
+	"github.com/josimar-silva/smaug/internal/handler"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/josimar-silva/smaug/internal/middleware"
@@ -162,6 +164,14 @@ func (m *RouteManager) Start(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	m.routes = make([]*routeListener, 0, len(m.config.Routes))
 
+	for _, route := range m.config.Routes {
+		listener := m.createListener(route)
+		m.routes = append(m.routes, listener)
+
+		m.wg.Add(1)
+		go m.runListener(listener)
+	}
+
 	m.logger.Info("route manager started",
 		"total_routes", len(m.config.Routes),
 	)
@@ -184,10 +194,55 @@ func (m *RouteManager) Stop() error {
 
 	m.cancel()
 	m.cancel = nil
+
+	routes := m.routes
 	m.mu.Unlock()
 
-	m.logger.Info("route manager stopped successfully")
-	return nil
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), m.shutdownTimeout)
+	defer shutdownCancel()
+
+	m.shutdownRoutes(shutdownCtx, routes)
+
+	return m.waitForShutdown(shutdownCtx)
+}
+
+func (m *RouteManager) shutdownRoutes(ctx context.Context, routes []*routeListener) {
+	for _, listener := range routes {
+		listener.stateMu.Lock()
+		listener.state = stateStopping
+		listener.stateMu.Unlock()
+
+		if err := listener.server.Shutdown(ctx); err != nil {
+			m.logger.Warn("listener shutdown error",
+				"route", listener.route.Name,
+				"error", err,
+			)
+			_ = listener.server.Close()
+		}
+
+		listener.stateMu.Lock()
+		listener.state = stateStopped
+		listener.stateMu.Unlock()
+	}
+}
+
+func (m *RouteManager) waitForShutdown(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		m.logger.Info("route manager stopped successfully")
+		return nil
+	case <-ctx.Done():
+		m.logger.Error("route manager shutdown timeout",
+			"timeout", m.shutdownTimeout,
+		)
+		return ErrShutdownTimeout
+	}
 }
 
 // GetActiveRoutes returns information about all active route listeners.
@@ -215,4 +270,68 @@ func (m *RouteManager) GetActiveRoutes() []RouteInfo {
 	}
 
 	return info
+}
+
+func (m *RouteManager) createListener(route config.Route) *routeListener {
+	proxyHandler := handler.NewProxyHandler(route.Upstream, m.logger)
+	wrappedHandler := m.middleware(proxyHandler)
+
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%d", route.Listen),
+		Handler:           wrappedHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+
+	return &routeListener{
+		route:   route,
+		server:  server,
+		handler: wrappedHandler,
+		logger:  m.logger,
+		state:   stateInitial,
+	}
+}
+
+func (m *RouteManager) runListener(listener *routeListener) {
+	defer m.wg.Done()
+
+	listener.stateMu.Lock()
+	listener.state = stateStarting
+	listener.stateMu.Unlock()
+
+	m.logger.Info("starting route listener",
+		"route", listener.route.Name,
+		"port", listener.route.Listen,
+		"upstream", listener.route.Upstream,
+		"server", listener.route.Server,
+	)
+
+	err := listener.server.ListenAndServe()
+
+	if err != nil && err != http.ErrServerClosed {
+		listener.stateMu.Lock()
+		listener.state = stateFailed
+		listener.startErr = err
+		listener.stateMu.Unlock()
+
+		m.logger.Error("route listener failed",
+			"route", listener.route.Name,
+			"port", listener.route.Listen,
+			"error", err,
+		)
+		return
+	}
+
+	listener.stateMu.Lock()
+	if listener.state == stateStarting {
+		listener.state = stateRunning
+	}
+	listener.stateMu.Unlock()
+
+	m.logger.Debug("route listener stopped",
+		"route", listener.route.Name,
+		"port", listener.route.Listen,
+	)
 }

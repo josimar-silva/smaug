@@ -25,8 +25,8 @@ var (
 	// ErrShutdownTimeout is returned when graceful shutdown exceeds the timeout.
 	ErrShutdownTimeout = errors.New("shutdown timeout: some listeners did not stop in time")
 
-	// ErrConfigMissing is returned when NewRouteManager is called with nil config.
-	ErrConfigMissing = errors.New("config cannot be nil")
+	// ErrConfigManagerMissing is returned when NewRouteManager is called with nil config manager.
+	ErrConfigManagerMissing = errors.New("config manager cannot be nil")
 
 	// ErrLoggerMissing is returned when NewRouteManager is called with nil logger.
 	ErrLoggerMissing = errors.New("logger cannot be nil")
@@ -36,6 +36,15 @@ var (
 
 	// ErrHealthStoreMissing is returned when NewRouteManager is called with nil health store.
 	ErrHealthStoreMissing = errors.New("health store cannot be nil")
+
+	// ErrReloadFailed is returned when config reload fails.
+	ErrReloadFailed = errors.New("config reload failed")
+
+	// ErrRouteStopFailed is returned when stopping a route fails during reload.
+	ErrRouteStopFailed = errors.New("failed to stop route")
+
+	// ErrRouteStartFailed is returned when starting a route fails during reload.
+	ErrRouteStartFailed = errors.New("failed to start route")
 )
 
 const (
@@ -44,7 +53,7 @@ const (
 
 // RouteManager manages HTTP listeners for all configured routes.
 type RouteManager struct {
-	config      *config.Config
+	configMgr   *config.ConfigManager
 	logger      *logger.Logger
 	middleware  middleware.Middleware
 	healthStore health.HealthStore
@@ -113,20 +122,27 @@ type RouteInfo struct {
 	State    string
 }
 
-// NewRouteManager creates a new RouteManager instance.
-// Returns an error if any parameter is nil.
+// NewRouteManager creates a new RouteManager instance with hot-reload support.
+//
+// Parameters:
+//   - configMgr: Configuration manager with hot-reload capability
+//   - log: Logger for structured logging
+//   - mw: Middleware chain to apply to all routes
+//   - store: Health status store for backend servers
+//
+// Returns a new RouteManager instance or an error if any parameter is nil.
 func NewRouteManager(
-	cfg *config.Config,
+	configMgr *config.ConfigManager,
 	log *logger.Logger,
 	mw middleware.Middleware,
 	store health.HealthStore,
 ) (*RouteManager, error) {
-	if err := validateDependencies(cfg, log, mw, store); err != nil {
+	if err := validateDependencies(configMgr, log, mw, store); err != nil {
 		return nil, err
 	}
 
 	return &RouteManager{
-		config:          cfg,
+		configMgr:       configMgr,
 		logger:          log,
 		middleware:      mw,
 		healthStore:     store,
@@ -135,9 +151,9 @@ func NewRouteManager(
 	}, nil
 }
 
-func validateDependencies(cfg *config.Config, log *logger.Logger, mw middleware.Middleware, store health.HealthStore) error {
-	if cfg == nil {
-		return ErrConfigMissing
+func validateDependencies(configMgr *config.ConfigManager, log *logger.Logger, mw middleware.Middleware, store health.HealthStore) error {
+	if configMgr == nil {
+		return ErrConfigManagerMissing
 	}
 	if log == nil {
 		return ErrLoggerMissing
@@ -153,6 +169,7 @@ func validateDependencies(cfg *config.Config, log *logger.Logger, mw middleware.
 }
 
 // Start initializes and starts HTTP listeners for all configured routes.
+// It also spawns a background goroutine to watch for config reloads.
 func (m *RouteManager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -161,10 +178,15 @@ func (m *RouteManager) Start(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 
-	m.ctx, m.cancel = context.WithCancel(ctx)
-	m.routes = make([]*routeListener, 0, len(m.config.Routes))
+	cfg := m.configMgr.GetConfig()
+	if cfg == nil {
+		return fmt.Errorf("%w: config manager returned nil config", ErrReloadFailed)
+	}
 
-	for _, route := range m.config.Routes {
+	m.ctx, m.cancel = context.WithCancel(ctx)
+	m.routes = make([]*routeListener, 0, len(cfg.Routes))
+
+	for _, route := range cfg.Routes {
 		listener := m.createListener(route)
 		key := routeKey(route)
 		m.routes = append(m.routes, listener)
@@ -175,13 +197,15 @@ func (m *RouteManager) Start(ctx context.Context) error {
 	}
 
 	m.logger.Info("route manager started",
-		"total_routes", len(m.config.Routes),
+		"total_routes", len(cfg.Routes),
 	)
+
+	go m.watchConfigReloads()
 
 	return nil
 }
 
-// Stop gracefully stops all route listeners.
+// Stop gracefully stops all route listeners and the config reload watcher.
 func (m *RouteManager) Stop() error {
 	m.mu.Lock()
 	if m.cancel == nil {
@@ -204,6 +228,8 @@ func (m *RouteManager) Stop() error {
 	defer shutdownCancel()
 
 	m.shutdownRoutes(shutdownCtx, routes)
+
+	m.reloadWg.Wait()
 
 	return m.waitForShutdown(shutdownCtx)
 }
@@ -444,9 +470,11 @@ func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 				"route_key", key,
 				"error", err,
 			)
-			errors = append(errors, fmt.Errorf("stop %s: %w", key, err))
+			errors = append(errors, fmt.Errorf("%w: %s: %v", ErrRouteStopFailed, key, err))
 		}
 	}
+
+	m.cleanupStoppedRoutes(routesToStop)
 
 	routesToStart := make([]config.Route, 0, len(changes.Added)+len(changes.Modified))
 	routesToStart = append(routesToStart, changes.Added...)
@@ -460,15 +488,78 @@ func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 				"port", route.Listen,
 				"error", err,
 			)
-			errors = append(errors, fmt.Errorf("start %s:%d: %w", route.Name, route.Listen, err))
+			errors = append(errors, fmt.Errorf("%w: %s:%d: %v", ErrRouteStartFailed, route.Name, route.Listen, err))
 		}
 	}
 
-	m.cleanupStoppedRoutes(routesToStop)
-
 	if len(errors) > 0 {
-		return fmt.Errorf("reload completed with %d errors: %v", len(errors), errors)
+		return fmt.Errorf("%w: reload completed with %d errors: %v", ErrReloadFailed, len(errors), errors)
 	}
 
+	return nil
+}
+
+// watchConfigReloads monitors the ConfigManager for reload signals and
+// orchestrates graceful route transitions.
+func (m *RouteManager) watchConfigReloads() {
+	m.reloadWg.Add(1)
+	defer m.reloadWg.Done()
+
+	reloadChan := m.configMgr.ReloadSignal()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			m.logger.Debug("stopping config reload watcher")
+			return
+
+		case <-reloadChan:
+			m.logger.Info("config reload signal received")
+			if err := m.handleReload(); err != nil {
+				m.logger.Error("config reload failed", "error", err)
+			}
+		}
+	}
+}
+
+// handleReload processes a configuration reload by computing diffs
+// and applying changes to running routes.
+func (m *RouteManager) handleReload() error {
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
+
+	m.logger.Info("starting route reload")
+
+	newConfig := m.configMgr.GetConfig()
+	if newConfig == nil {
+		return fmt.Errorf("%w: config manager returned nil config", ErrReloadFailed)
+	}
+
+	m.mu.RLock()
+	oldRoutes := make([]config.Route, 0, len(m.routes))
+	for _, listener := range m.routes {
+		oldRoutes = append(oldRoutes, listener.route)
+	}
+	m.mu.RUnlock()
+
+	changes := detectChanges(oldRoutes, newConfig.Routes)
+
+	m.logger.Info("route changes detected",
+		"added", len(changes.Added),
+		"removed", len(changes.Removed),
+		"modified", len(changes.Modified),
+		"unchanged", len(changes.Unchanged),
+	)
+
+	if len(changes.Added) == 0 && len(changes.Removed) == 0 && len(changes.Modified) == 0 {
+		m.logger.Info("no route changes detected, skipping reload")
+		return nil
+	}
+
+	if err := m.applyRouteChanges(changes); err != nil {
+		return err
+	}
+
+	m.logger.Info("route reload completed successfully")
 	return nil
 }

@@ -3,8 +3,12 @@ package proxy
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
@@ -12,17 +16,63 @@ import (
 	"github.com/josimar-silva/smaug/internal/store"
 )
 
-func TestNewRouteManager_ValidParameters(t *testing.T) {
+func createTestConfigManager(t *testing.T, cfg *config.Config) *config.ConfigManager {
+	t.Helper()
+
+	ensureServersExist(cfg)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "test-config.yaml")
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	configMgr, err := config.NewManager(configPath, log)
+	if err != nil {
+		t.Fatalf("failed to create config manager: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = configMgr.Stop()
+	})
+
+	return configMgr
+}
+
+func ensureServersExist(cfg *config.Config) {
+	if cfg.Servers == nil {
+		cfg.Servers = make(map[string]config.Server)
+	}
+
+	for _, route := range cfg.Routes {
+		if _, exists := cfg.Servers[route.Server]; !exists {
+			cfg.Servers[route.Server] = config.Server{
+				MAC:       "AA:BB:CC:DD:EE:FF",
+				Broadcast: "192.168.1.255",
+			}
+		}
+	}
+}
+
+func TestNewRouteManagerValidParameters(t *testing.T) {
 	// Given: Valid dependencies
 	cfg := &config.Config{
 		Routes: []config.Route{},
 	}
+	configMgr := createTestConfigManager(t, cfg)
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
-	store := store.NewInMemoryHealthStore()
+	healthStore := store.NewInMemoryHealthStore()
 
 	// When: Creating RouteManager
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
 
 	// Then: RouteManager should be created successfully
 	if err != nil {
@@ -31,8 +81,8 @@ func TestNewRouteManager_ValidParameters(t *testing.T) {
 	if rm == nil {
 		t.Fatal("expected RouteManager to be created, got nil")
 	}
-	if rm.config != cfg {
-		t.Error("expected config to be set")
+	if rm.configMgr != configMgr {
+		t.Error("expected config manager to be set")
 	}
 	if rm.logger == nil {
 		t.Error("expected logger to be set")
@@ -42,68 +92,71 @@ func TestNewRouteManager_ValidParameters(t *testing.T) {
 	}
 }
 
-func TestNewRouteManager_NilConfig(t *testing.T) {
-	// Given: Nil config
+func TestNewRouteManagerNilConfigManager(t *testing.T) {
+	// Given: Nil config manager
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
-	store := store.NewInMemoryHealthStore()
+	healthStore := store.NewInMemoryHealthStore()
 
-	// When: Creating RouteManager with nil config
-	rm, err := NewRouteManager(nil, log, mw, store)
+	// When: Creating RouteManager with nil config manager
+	rm, err := NewRouteManager(nil, log, mw, healthStore)
 
-	// Then: Should return ErrConfigMissing
+	// Then: Should return ErrConfigManagerMissing
 	if rm != nil {
 		t.Error("expected nil RouteManager")
 	}
-	if !errors.Is(err, ErrConfigMissing) {
-		t.Errorf("expected ErrConfigMissing, got: %v", err)
+	if !errors.Is(err, ErrConfigManagerMissing) {
+		t.Errorf("expected ErrConfigManagerMissing, got: %v", err)
 	}
 }
 
-func TestNewRouteManager_NilLogger(t *testing.T) {
+func TestNewRouteManagerNilLogger(t *testing.T) {
 	// Given: Nil logger
 	cfg := &config.Config{}
+	configMgr := createTestConfigManager(t, cfg)
 	mw := middleware.Chain()
-	store := store.NewInMemoryHealthStore()
+	healthStore := store.NewInMemoryHealthStore()
 
 	// When: Creating RouteManager with nil logger
-	rm, err := NewRouteManager(cfg, nil, mw, store)
+	rm, err := NewRouteManager(configMgr, nil, mw, healthStore)
 
-	// Then: Should return ErrNilLogger
+	// Then: Should return ErrLoggerMissing
 	if rm != nil {
 		t.Error("expected nil RouteManager")
 	}
 	if !errors.Is(err, ErrLoggerMissing) {
-		t.Errorf("expected ErrNilLogger, got: %v", err)
+		t.Errorf("expected ErrLoggerMissing, got: %v", err)
 	}
 }
 
-func TestNewRouteManager_NilMiddleware(t *testing.T) {
+func TestNewRouteManagerNilMiddleware(t *testing.T) {
 	// Given: Nil middleware
 	cfg := &config.Config{}
+	configMgr := createTestConfigManager(t, cfg)
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
-	store := store.NewInMemoryHealthStore()
+	healthStore := store.NewInMemoryHealthStore()
 
 	// When: Creating RouteManager with nil middleware
-	rm, err := NewRouteManager(cfg, log, nil, store)
+	rm, err := NewRouteManager(configMgr, log, nil, healthStore)
 
-	// Then: Should return ErrNilMiddleware
+	// Then: Should return ErrMiddlewareMissing
 	if rm != nil {
 		t.Error("expected nil RouteManager")
 	}
 	if !errors.Is(err, ErrMiddlewareMissing) {
-		t.Errorf("expected ErrNilMiddleware, got: %v", err)
+		t.Errorf("expected ErrMiddlewareMissing, got: %v", err)
 	}
 }
 
-func TestNewRouteManager_NilHealthStore(t *testing.T) {
+func TestNewRouteManagerNilHealthStore(t *testing.T) {
 	// Given: Nil health store
 	cfg := &config.Config{}
+	configMgr := createTestConfigManager(t, cfg)
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 
 	// When: Creating RouteManager with nil health store
-	rm, err := NewRouteManager(cfg, log, mw, nil)
+	rm, err := NewRouteManager(configMgr, log, mw, nil)
 
 	// Then: Should return ErrHealthStoreMissing
 	if rm != nil {
@@ -114,7 +167,7 @@ func TestNewRouteManager_NilHealthStore(t *testing.T) {
 	}
 }
 
-func TestListenerState_String(t *testing.T) {
+func TestListenerStateString(t *testing.T) {
 	tests := []struct {
 		name     string
 		state    listenerState
@@ -170,7 +223,7 @@ func TestListenerState_String(t *testing.T) {
 	}
 }
 
-func TestRouteManager_GetActiveRoutes_EmptyManager(t *testing.T) {
+func TestRouteManagerGetActiveRoutesEmptyManager(t *testing.T) {
 	// Given: RouteManager with no routes
 	cfg := &config.Config{
 		Routes: []config.Route{},
@@ -178,7 +231,8 @@ func TestRouteManager_GetActiveRoutes_EmptyManager(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -192,7 +246,7 @@ func TestRouteManager_GetActiveRoutes_EmptyManager(t *testing.T) {
 	}
 }
 
-func TestRouteManager_Start_AlreadyRunning(t *testing.T) {
+func TestRouteManagerStartAlreadyRunning(t *testing.T) {
 	// Given: A running RouteManager
 	cfg := &config.Config{
 		Routes: []config.Route{},
@@ -200,7 +254,8 @@ func TestRouteManager_Start_AlreadyRunning(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -227,7 +282,7 @@ func TestRouteManager_Start_AlreadyRunning(t *testing.T) {
 	}
 }
 
-func TestRouteManager_Stop_NotRunning(t *testing.T) {
+func TestRouteManagerStopNotRunning(t *testing.T) {
 	// Given: A RouteManager that was never started
 	cfg := &config.Config{
 		Routes: []config.Route{},
@@ -235,7 +290,8 @@ func TestRouteManager_Stop_NotRunning(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -252,7 +308,7 @@ func TestRouteManager_Stop_NotRunning(t *testing.T) {
 	}
 }
 
-func TestRouteManager_Start_SingleRoute(t *testing.T) {
+func TestRouteManagerStartSingleRoute(t *testing.T) {
 	// Given: RouteManager with one route
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -267,7 +323,8 @@ func TestRouteManager_Start_SingleRoute(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -303,7 +360,7 @@ func TestRouteManager_Start_SingleRoute(t *testing.T) {
 	}
 }
 
-func TestRouteManager_Start_MultipleRoutes(t *testing.T) {
+func TestRouteManagerStartMultipleRoutes(t *testing.T) {
 	// Given: RouteManager with multiple routes
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -324,7 +381,8 @@ func TestRouteManager_Start_MultipleRoutes(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -348,7 +406,7 @@ func TestRouteManager_Start_MultipleRoutes(t *testing.T) {
 	}
 }
 
-func TestRouteManager_Stop_Graceful(t *testing.T) {
+func TestRouteManagerStopGraceful(t *testing.T) {
 	// Given: A running RouteManager with one route
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -363,7 +421,8 @@ func TestRouteManager_Stop_Graceful(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -388,7 +447,7 @@ func TestRouteManager_Stop_Graceful(t *testing.T) {
 	}
 }
 
-func TestRouteManager_StopRoute_Success(t *testing.T) {
+func TestRouteManagerStopRouteSuccess(t *testing.T) {
 	// Given: A running RouteManager with one route
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -403,7 +462,8 @@ func TestRouteManager_StopRoute_Success(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -427,7 +487,7 @@ func TestRouteManager_StopRoute_Success(t *testing.T) {
 	}
 }
 
-func TestRouteManager_StopRoute_NotFound(t *testing.T) {
+func TestRouteManagerStopRouteNotFound(t *testing.T) {
 	// Given: A running RouteManager
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -442,7 +502,8 @@ func TestRouteManager_StopRoute_NotFound(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -464,7 +525,7 @@ func TestRouteManager_StopRoute_NotFound(t *testing.T) {
 	}
 }
 
-func TestRouteManager_StartRoute_Success(t *testing.T) {
+func TestRouteManagerStartRouteSuccess(t *testing.T) {
 	// Given: A running RouteManager
 	cfg := &config.Config{
 		Routes: []config.Route{},
@@ -472,7 +533,8 @@ func TestRouteManager_StartRoute_Success(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}
@@ -510,7 +572,7 @@ func TestRouteManager_StartRoute_Success(t *testing.T) {
 	}
 }
 
-func TestRouteManager_CleanupStoppedRoutes(t *testing.T) {
+func TestRouteManagerCleanupStoppedRoutes(t *testing.T) {
 	// Given: A RouteManager with multiple routes
 	cfg := &config.Config{
 		Routes: []config.Route{
@@ -537,7 +599,8 @@ func TestRouteManager_CleanupStoppedRoutes(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	mw := middleware.Chain()
 	store := store.NewInMemoryHealthStore()
-	rm, err := NewRouteManager(cfg, log, mw, store)
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, store)
 	if err != nil {
 		t.Fatalf("failed to create route manager: %v", err)
 	}

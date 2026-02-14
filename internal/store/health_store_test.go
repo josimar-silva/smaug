@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/josimar-silva/smaug/internal/health"
 )
 
 // TestInMemoryHealthStore_Get_UnknownServer tests that Get returns unhealthy default for unknown servers.

@@ -508,7 +508,7 @@ func TestDetectChangesBothEmpty(t *testing.T) {
 	}
 }
 
-func BenchmarkDetectChanges_100Routes(b *testing.B) {
+func BenchmarkDetectChanges100Routes(b *testing.B) {
 	// Given: 100 routes with 10% modified
 	oldRoutes := make([]config.Route, 100)
 	newRoutes := make([]config.Route, 100)
@@ -537,7 +537,7 @@ func BenchmarkDetectChanges_100Routes(b *testing.B) {
 	}
 }
 
-func BenchmarkDetectChanges_10Routes(b *testing.B) {
+func BenchmarkDetectChanges10Routes(b *testing.B) {
 	// Given: 10 routes (typical homelab scenario)
 	oldRoutes := make([]config.Route, 10)
 	newRoutes := make([]config.Route, 10)

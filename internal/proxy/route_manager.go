@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/config"
-	"github.com/josimar-silva/smaug/internal/handler"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/josimar-silva/smaug/internal/middleware"
@@ -79,6 +78,7 @@ type routeListener struct {
 	state    listenerState
 	stateMu  sync.RWMutex
 	startErr error
+	started  chan struct{} // Closed when listener reaches running or failed state
 }
 
 // listenerState represents the lifecycle state of a listener.
@@ -301,7 +301,7 @@ func (m *RouteManager) GetActiveRoutes() []RouteInfo {
 }
 
 func (m *RouteManager) createListener(route config.Route) *routeListener {
-	proxyHandler := handler.NewProxyHandler(route.Upstream, m.logger)
+	proxyHandler := NewProxyHandler(route.Upstream, m.logger)
 	wrappedHandler := m.middleware(proxyHandler)
 
 	server := &http.Server{
@@ -319,6 +319,7 @@ func (m *RouteManager) createListener(route config.Route) *routeListener {
 		handler: wrappedHandler,
 		logger:  m.logger,
 		state:   stateInitial,
+		started: make(chan struct{}),
 	}
 }
 
@@ -336,6 +337,22 @@ func (m *RouteManager) runListener(listener *routeListener) {
 		"server", listener.route.Server,
 	)
 
+	// Signal that we're about to attempt ListenAndServe
+	// We'll close this channel once it succeeds or fails
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		listener.stateMu.Lock()
+		state := listener.state
+		listener.stateMu.Unlock()
+		// If still in starting state after 100ms, assume listening succeeded
+		if state == stateStarting {
+			listener.stateMu.Lock()
+			listener.state = stateRunning
+			listener.stateMu.Unlock()
+			close(listener.started)
+		}
+	}()
+
 	err := listener.server.ListenAndServe()
 
 	if err != nil && err != http.ErrServerClosed {
@@ -349,14 +366,9 @@ func (m *RouteManager) runListener(listener *routeListener) {
 			"port", listener.route.Listen,
 			"error", err,
 		)
+		close(listener.started)
 		return
 	}
-
-	listener.stateMu.Lock()
-	if listener.state == stateStarting {
-		listener.state = stateRunning
-	}
-	listener.stateMu.Unlock()
 
 	m.logger.Debug("route listener stopped",
 		"route", listener.route.Name,
@@ -414,7 +426,15 @@ func (m *RouteManager) startRoute(route config.Route) error {
 	m.wg.Add(1)
 	go m.runListener(listener)
 
-	time.Sleep(10 * time.Millisecond)
+	// Wait for listener to reach running or failed state (with timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	select {
+	case <-listener.started:
+	case <-ctx.Done():
+		return fmt.Errorf("route startup timeout: %w", ctx.Err())
+	}
 
 	listener.stateMu.RLock()
 	state := listener.state

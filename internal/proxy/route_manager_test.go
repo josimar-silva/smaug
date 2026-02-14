@@ -251,3 +251,139 @@ func TestRouteManager_Stop_NotRunning(t *testing.T) {
 		t.Errorf("expected ErrNotRunning, got: %v", err)
 	}
 }
+
+func TestRouteManager_Start_SingleRoute(t *testing.T) {
+	// Given: RouteManager with one route
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18080,
+				Upstream: "http://localhost:19000",
+				Server:   "test-server",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	// When: Starting route manager
+	ctx := context.Background()
+	err = rm.Start(ctx)
+	if err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		if err := rm.Stop(); err != nil {
+			t.Errorf("failed to stop route manager: %v", err)
+		}
+	}()
+
+	// Give listeners time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Then: Route should be active
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if routes[0].Name != "test" {
+		t.Errorf("expected route name 'test', got %q", routes[0].Name)
+	}
+	if routes[0].Port != 18080 {
+		t.Errorf("expected port 18080, got %d", routes[0].Port)
+	}
+	if routes[0].State != "starting" && routes[0].State != "running" {
+		t.Errorf("expected state 'starting' or 'running', got %q", routes[0].State)
+	}
+}
+
+func TestRouteManager_Start_MultipleRoutes(t *testing.T) {
+	// Given: RouteManager with multiple routes
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "route1",
+				Listen:   18081,
+				Upstream: "http://localhost:19001",
+				Server:   "server1",
+			},
+			{
+				Name:     "route2",
+				Listen:   18082,
+				Upstream: "http://localhost:19002",
+				Server:   "server2",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	// When: Starting route manager
+	ctx := context.Background()
+	err = rm.Start(ctx)
+	if err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		if err := rm.Stop(); err != nil {
+			t.Errorf("failed to stop route manager: %v", err)
+		}
+	}()
+
+	// Then: Both routes should be active
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(routes))
+	}
+}
+
+func TestRouteManager_Stop_Graceful(t *testing.T) {
+	// Given: A running RouteManager with one route
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18083,
+				Upstream: "http://localhost:19003",
+				Server:   "test-server",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+
+	// When: Stopping gracefully
+	err = rm.Stop()
+
+	// Then: Should stop without error
+	if err != nil {
+		t.Errorf("expected graceful stop, got error: %v", err)
+	}
+
+	// And: Should not be able to call Stop again
+	err = rm.Stop()
+	if !errors.Is(err, ErrNotRunning) {
+		t.Errorf("expected ErrNotRunning after stop, got: %v", err)
+	}
+}

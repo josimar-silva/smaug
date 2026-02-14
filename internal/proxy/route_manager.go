@@ -166,7 +166,9 @@ func (m *RouteManager) Start(ctx context.Context) error {
 
 	for _, route := range m.config.Routes {
 		listener := m.createListener(route)
+		key := routeKey(route)
 		m.routes = append(m.routes, listener)
+		m.routeMap[key] = listener
 
 		m.wg.Add(1)
 		go m.runListener(listener)
@@ -334,4 +336,139 @@ func (m *RouteManager) runListener(listener *routeListener) {
 		"route", listener.route.Name,
 		"port", listener.route.Listen,
 	)
+}
+
+func (m *RouteManager) stopRoute(key string) error {
+	m.mu.RLock()
+	listener, exists := m.routeMap[key]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("route %s not found", key)
+	}
+
+	m.logger.Info("stopping route",
+		"route", listener.route.Name,
+		"port", listener.route.Listen,
+	)
+
+	listener.stateMu.Lock()
+	listener.state = stateStopping
+	listener.stateMu.Unlock()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), m.shutdownTimeout)
+	defer cancel()
+
+	if err := listener.server.Shutdown(shutdownCtx); err != nil {
+		_ = listener.server.Close()
+		return fmt.Errorf("shutdown failed: %w", err)
+	}
+
+	listener.stateMu.Lock()
+	listener.state = stateStopped
+	listener.stateMu.Unlock()
+
+	m.logger.Info("route stopped successfully",
+		"route", listener.route.Name,
+		"port", listener.route.Listen,
+	)
+
+	return nil
+}
+
+func (m *RouteManager) startRoute(route config.Route) error {
+	listener := m.createListener(route)
+
+	m.mu.Lock()
+	key := routeKey(route)
+	m.routeMap[key] = listener
+	m.routes = append(m.routes, listener)
+	m.mu.Unlock()
+
+	m.wg.Add(1)
+	go m.runListener(listener)
+
+	time.Sleep(10 * time.Millisecond)
+
+	listener.stateMu.RLock()
+	state := listener.state
+	err := listener.startErr
+	listener.stateMu.RUnlock()
+
+	if state == stateFailed {
+		return fmt.Errorf("route failed to start: %w", err)
+	}
+
+	m.logger.Info("route started successfully",
+		"route", route.Name,
+		"port", route.Listen,
+	)
+
+	return nil
+}
+
+func (m *RouteManager) cleanupStoppedRoutes(keys []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	keysMap := make(map[string]bool)
+	for _, key := range keys {
+		keysMap[key] = true
+		delete(m.routeMap, key)
+	}
+
+	activeRoutes := make([]*routeListener, 0, len(m.routes))
+	for _, listener := range m.routes {
+		key := routeKey(listener.route)
+		if !keysMap[key] {
+			activeRoutes = append(activeRoutes, listener)
+		}
+	}
+	m.routes = activeRoutes
+}
+
+func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
+	var errors []error
+
+	routesToStop := make([]string, 0, len(changes.Removed)+len(changes.Modified))
+	routesToStop = append(routesToStop, changes.Removed...)
+
+	for _, route := range changes.Modified {
+		routesToStop = append(routesToStop, routeKey(route))
+	}
+
+	m.logger.Info("stopping routes", "count", len(routesToStop))
+	for _, key := range routesToStop {
+		if err := m.stopRoute(key); err != nil {
+			m.logger.Error("failed to stop route",
+				"route_key", key,
+				"error", err,
+			)
+			errors = append(errors, fmt.Errorf("stop %s: %w", key, err))
+		}
+	}
+
+	routesToStart := make([]config.Route, 0, len(changes.Added)+len(changes.Modified))
+	routesToStart = append(routesToStart, changes.Added...)
+	routesToStart = append(routesToStart, changes.Modified...)
+
+	m.logger.Info("starting routes", "count", len(routesToStart))
+	for _, route := range routesToStart {
+		if err := m.startRoute(route); err != nil {
+			m.logger.Error("failed to start route",
+				"route", route.Name,
+				"port", route.Listen,
+				"error", err,
+			)
+			errors = append(errors, fmt.Errorf("start %s:%d: %w", route.Name, route.Listen, err))
+		}
+	}
+
+	m.cleanupStoppedRoutes(routesToStop)
+
+	if len(errors) > 0 {
+		return fmt.Errorf("reload completed with %d errors: %v", len(errors), errors)
+	}
+
+	return nil
 }

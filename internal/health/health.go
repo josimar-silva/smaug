@@ -29,15 +29,6 @@ const (
 	defaultMaxRedirects = 3
 )
 
-// HealthChecker performs HTTP health checks on a specific backend endpoint.
-// Each HealthChecker is bound to a single endpoint with its own timeout configuration.
-type HealthChecker struct {
-	endpoint string         // The health check endpoint URL
-	timeout  time.Duration  // Maximum time to wait for a response
-	client   *http.Client   // HTTP client for making requests
-	logger   *logger.Logger // Structured logger
-}
-
 // NewHealthChecker creates a new HealthChecker for a specific endpoint.
 // The checker is configured with the given timeout and follows up to 3 redirects.
 //

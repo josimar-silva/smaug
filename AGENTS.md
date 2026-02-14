@@ -89,25 +89,44 @@ Apply functional principles where appropriate:
 - **Implementations:** Include implementation detail (e.g., `InMemoryMachineRepository`)
 - **Methods:** Clear action verbs (e.g., `SendWoLPacket`, `GetMachine`, `ListMachines`)
 - **Variables:** Descriptive, avoid single letters except in very short scopes
-- **Errors:** Use domain-specific errors defined in `domain/errors.go`
+- **Errors:** Use domain-specific errors (see Error Handling section below)
 
 ### Error Handling
 
+**Domain Errors Pattern:**
+
+Define domain errors close to where they're used (in the same package). Use `errors.New()` for base errors and wrap them with context when returning.
+
 ```go
-// Domain errors (domain/errors.go)
+// Define domain errors at the package level
+// Example: internal/service/health/health.go
 var (
-    ErrMachineNotFound = errors.New("machine not found")
-    ErrInvalidMAC      = errors.New("invalid MAC address")
+    // ErrHealthCheckFailed is returned when a health check fails due to an unhealthy status code (4xx, 5xx).
+    ErrHealthCheckFailed = errors.New("health check failed: unhealthy status code")
+
+    // ErrHealthCheckNetworkError is returned when a health check request fails due to network issues.
+    ErrHealthCheckNetworkError = errors.New("health check failed: network error")
 )
 
-// Always wrap errors with context
-return fmt.Errorf("failed to send WoL packet: %w", err)
+// Wrap domain errors with context using %w (preserves error chain for errors.Is())
+return fmt.Errorf("%w: %s returned status %d", ErrHealthCheckFailed, url, statusCode)
 
-// Check for specific errors
-if errors.Is(err, domain.ErrMachineNotFound) {
-    // Handle not found
+// Check for specific domain errors using errors.Is()
+if errors.Is(err, ErrHealthCheckNetworkError) {
+    // Handle network error specifically
+}
+
+if errors.Is(err, ErrHealthCheckFailed) {
+    // Handle unhealthy status code
 }
 ```
+
+**Key Principles:**
+- Define domain errors in the package where they're used (not in a separate `errors.go`)
+- Use descriptive error messages that explain the failure condition
+- Always wrap errors with `%w` to preserve the error chain
+- Use `errors.Is()` to check for specific error types (never string comparison)
+- Document which errors a function can return in its godoc comments
 
 ### Logging
 

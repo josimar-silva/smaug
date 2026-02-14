@@ -387,3 +387,201 @@ func TestRouteManager_Stop_Graceful(t *testing.T) {
 		t.Errorf("expected ErrNotRunning after stop, got: %v", err)
 	}
 }
+
+func TestRouteManager_StopRoute_Success(t *testing.T) {
+	// Given: A running RouteManager with one route
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18090,
+				Upstream: "http://localhost:19010",
+				Server:   "test-server",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// When: Stopping specific route
+	err = rm.stopRoute("test:18090")
+
+	// Then: Should stop successfully
+	if err != nil {
+		t.Errorf("expected successful stop, got error: %v", err)
+	}
+}
+
+func TestRouteManager_StopRoute_NotFound(t *testing.T) {
+	// Given: A running RouteManager
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18091,
+				Upstream: "http://localhost:19011",
+				Server:   "test-server",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	// When: Stopping non-existent route
+	err = rm.stopRoute("nonexistent:9999")
+
+	// Then: Should return error
+	if err == nil {
+		t.Error("expected error for non-existent route")
+	}
+}
+
+func TestRouteManager_StartRoute_Success(t *testing.T) {
+	// Given: A running RouteManager
+	cfg := &config.Config{
+		Routes: []config.Route{},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	// When: Starting a new route
+	newRoute := config.Route{
+		Name:     "dynamic",
+		Listen:   18092,
+		Upstream: "http://localhost:19012",
+		Server:   "test-server",
+	}
+	err = rm.startRoute(newRoute)
+
+	// Then: Route should start successfully
+	if err != nil {
+		t.Errorf("expected successful start, got error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if routes[0].Name != "dynamic" {
+		t.Errorf("expected route name 'dynamic', got %q", routes[0].Name)
+	}
+}
+
+func TestRouteManager_CleanupStoppedRoutes(t *testing.T) {
+	// Given: A RouteManager with multiple routes
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "route1",
+				Listen:   18093,
+				Upstream: "http://localhost:19013",
+				Server:   "server1",
+			},
+			{
+				Name:     "route2",
+				Listen:   18094,
+				Upstream: "http://localhost:19014",
+				Server:   "server2",
+			},
+			{
+				Name:     "route3",
+				Listen:   18095,
+				Upstream: "http://localhost:19015",
+				Server:   "server3",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	store := store.NewInMemoryHealthStore()
+	rm, err := NewRouteManager(cfg, log, mw, store)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop the routes first before cleanup
+	if err := rm.stopRoute("route1:18093"); err != nil {
+		t.Fatalf("failed to stop route1: %v", err)
+	}
+	if err := rm.stopRoute("route3:18095"); err != nil {
+		t.Fatalf("failed to stop route3: %v", err)
+	}
+
+	// When: Cleaning up specific routes
+	keysToCleanup := []string{"route1:18093", "route3:18095"}
+	rm.cleanupStoppedRoutes(keysToCleanup)
+
+	// Then: Only route2 should remain
+	rm.mu.RLock()
+	routeCount := len(rm.routes)
+	mapCount := len(rm.routeMap)
+	rm.mu.RUnlock()
+
+	if routeCount != 1 {
+		t.Errorf("expected 1 route in slice, got %d", routeCount)
+	}
+	if mapCount != 1 {
+		t.Errorf("expected 1 route in map, got %d", mapCount)
+	}
+
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 active route, got %d", len(routes))
+	}
+	if routes[0].Name != "route2" {
+		t.Errorf("expected remaining route 'route2', got %q", routes[0].Name)
+	}
+}

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -647,4 +648,249 @@ func TestRouteManagerCleanupStoppedRoutes(t *testing.T) {
 	if routes[0].Name != "route2" {
 		t.Errorf("expected remaining route 'route2', got %q", routes[0].Name)
 	}
+}
+
+func TestApplyRouteChangesSuccessfulReload(t *testing.T) {
+	// Given: RouteManager with multiple routes and change detection
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "route1",
+				Listen:   18100,
+				Upstream: "http://localhost:19100",
+				Server:   "server1",
+			},
+			{
+				Name:     "route2",
+				Listen:   18101,
+				Upstream: "http://localhost:19101",
+				Server:   "server2",
+			},
+			{
+				Name:     "route3",
+				Listen:   18102,
+				Upstream: "http://localhost:19102",
+				Server:   "server3",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	// When: Applying route changes (remove route2, modify route1, keep route3)
+	changes := RouteChanges{
+		Removed: []string{"route2:18101"},
+		Modified: []config.Route{
+			{
+				Name:     "route1",
+				Listen:   18100,
+				Upstream: "http://localhost:19100",
+				Server:   "server1",
+			},
+		},
+		Added:     []config.Route{},
+		Unchanged: []string{"route3:18102"},
+	}
+
+	err = rm.applyRouteChanges(changes)
+
+	// Then: Should apply changes successfully
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes after changes, got %d", len(routes))
+	}
+
+	routeMap := make(map[string]bool)
+	for _, r := range routes {
+		routeMap[r.Name] = true
+	}
+
+	if !routeMap["route1"] || !routeMap["route3"] {
+		t.Error("expected route1 and route3 to be active")
+	}
+}
+
+func TestApplyRouteChangesWithAdditions(t *testing.T) {
+	// Given: Running RouteManager with no routes
+	cfg := &config.Config{
+		Routes: []config.Route{},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	// When: Adding new routes
+	changes := RouteChanges{
+		Added: []config.Route{
+			{
+				Name:     "new1",
+				Listen:   18110,
+				Upstream: "http://localhost:19110",
+				Server:   "server1",
+			},
+			{
+				Name:     "new2",
+				Listen:   18111,
+				Upstream: "http://localhost:19111",
+				Server:   "server2",
+			},
+		},
+		Removed:   []string{},
+		Modified:  []config.Route{},
+		Unchanged: []string{},
+	}
+
+	err = rm.applyRouteChanges(changes)
+
+	// Then: Should add routes successfully
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(routes))
+	}
+}
+
+func TestHandleReloadNoChanges(t *testing.T) {
+	// Given: RouteManager with a route that has no configuration changes
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18120,
+				Upstream: "http://localhost:19120",
+				Server:   "server1",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := rm.Start(ctx); err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+	defer func() {
+		_ = rm.Stop()
+	}()
+
+	// When: Handling reload with identical config
+	err = rm.handleReload()
+
+	// Then: Should succeed without making changes
+	if err != nil {
+		t.Errorf("expected no error on reload, got: %v", err)
+	}
+
+	// Routes should remain unchanged
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 1 {
+		t.Errorf("expected 1 route to remain, got %d", len(routes))
+	}
+}
+
+func TestRunListenerStartupFailure(t *testing.T) {
+	// Given: Route configured to listen on a port that's already in use
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{
+				Name:     "test",
+				Listen:   18130,
+				Upstream: "http://localhost:19130",
+				Server:   "server1",
+			},
+		},
+	}
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+	configMgr := createTestConfigManager(t, cfg)
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Block the port first
+	blockingServer := &http.Server{
+		Addr:              ":18130",
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	blockingDone := make(chan struct{})
+	go func() {
+		_ = blockingServer.ListenAndServe()
+		close(blockingDone)
+	}()
+
+	t.Cleanup(func() {
+		_ = blockingServer.Close()
+		select {
+		case <-blockingDone:
+		case <-time.After(time.Second):
+		}
+	})
+
+	// Give blocking server time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// When: Attempting to start route on already-bound port
+	_ = rm.Start(ctx)
+
+	// Give listener goroutine time to fail
+	time.Sleep(200 * time.Millisecond)
+
+	// Then: Route should be in failed state
+	routes := rm.GetActiveRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+
+	failedRoute := routes[0]
+	if failedRoute.State != "failed" {
+		t.Errorf("expected route to be in 'failed' state, got '%s'", failedRoute.State)
+	}
+
+	_ = rm.Stop()
 }

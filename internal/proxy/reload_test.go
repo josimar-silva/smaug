@@ -160,7 +160,7 @@ func TestRouteEquals(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_NoChanges(t *testing.T) {
+func TestDetectChangesNoChanges(t *testing.T) {
 	// Given: Identical old and new route configurations
 	oldRoutes := []config.Route{
 		{
@@ -209,7 +209,7 @@ func TestDetectChanges_NoChanges(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_AddedRoutes(t *testing.T) {
+func TestDetectChangesAddedRoutes(t *testing.T) {
 	// Given: New route added to configuration
 	oldRoutes := []config.Route{
 		{
@@ -255,7 +255,7 @@ func TestDetectChanges_AddedRoutes(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_RemovedRoutes(t *testing.T) {
+func TestDetectChangesRemovedRoutes(t *testing.T) {
 	// Given: Route removed from configuration
 	oldRoutes := []config.Route{
 		{
@@ -301,7 +301,7 @@ func TestDetectChanges_RemovedRoutes(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_ModifiedRoutes(t *testing.T) {
+func TestDetectChangesModifiedRoutes(t *testing.T) {
 	// Given: Route with changed upstream
 	oldRoutes := []config.Route{
 		{
@@ -341,7 +341,7 @@ func TestDetectChanges_ModifiedRoutes(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_MixedChanges(t *testing.T) {
+func TestDetectChangesMixedChanges(t *testing.T) {
 	// Given: Multiple changes - add, remove, modify, unchanged
 	oldRoutes := []config.Route{
 		{
@@ -413,7 +413,7 @@ func TestDetectChanges_MixedChanges(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_EmptyOldRoutes(t *testing.T) {
+func TestDetectChangesEmptyOldRoutes(t *testing.T) {
 	// Given: Empty old routes, new routes added
 	oldRoutes := []config.Route{}
 	newRoutes := []config.Route{
@@ -449,7 +449,7 @@ func TestDetectChanges_EmptyOldRoutes(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_EmptyNewRoutes(t *testing.T) {
+func TestDetectChangesEmptyNewRoutes(t *testing.T) {
 	// Given: All routes removed
 	oldRoutes := []config.Route{
 		{
@@ -485,7 +485,7 @@ func TestDetectChanges_EmptyNewRoutes(t *testing.T) {
 	}
 }
 
-func TestDetectChanges_BothEmpty(t *testing.T) {
+func TestDetectChangesBothEmpty(t *testing.T) {
 	// Given: Empty old and new routes
 	oldRoutes := []config.Route{}
 	newRoutes := []config.Route{}

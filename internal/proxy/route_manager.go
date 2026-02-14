@@ -71,14 +71,15 @@ type RouteManager struct {
 
 // routeListener represents a single HTTP listener for a route.
 type routeListener struct {
-	route    config.Route
-	server   *http.Server
-	handler  http.Handler
-	logger   *logger.Logger
-	state    listenerState
-	stateMu  sync.RWMutex
-	startErr error
-	started  chan struct{} // Closed when listener reaches running or failed state
+	route       config.Route
+	server      *http.Server
+	handler     http.Handler
+	logger      *logger.Logger
+	state       listenerState
+	stateMu     sync.RWMutex
+	startErr    error
+	started     chan struct{} // Closed when listener reaches running or failed state
+	startedOnce sync.Once     // Ensures started channel is closed exactly once
 }
 
 // listenerState represents the lifecycle state of a listener.
@@ -349,13 +350,13 @@ func (m *RouteManager) runListener(listener *routeListener) {
 			listener.stateMu.Lock()
 			listener.state = stateRunning
 			listener.stateMu.Unlock()
-			close(listener.started)
+			listener.startedOnce.Do(func() { close(listener.started) })
 		}
 	}()
 
 	err := listener.server.ListenAndServe()
 
-	if err != nil && err != http.ErrServerClosed {
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		listener.stateMu.Lock()
 		listener.state = stateFailed
 		listener.startErr = err
@@ -366,7 +367,7 @@ func (m *RouteManager) runListener(listener *routeListener) {
 			"port", listener.route.Listen,
 			"error", err,
 		)
-		close(listener.started)
+		listener.startedOnce.Do(func() { close(listener.started) })
 		return
 	}
 
@@ -414,10 +415,27 @@ func (m *RouteManager) stopRoute(key string) error {
 	return nil
 }
 
+// startRoute starts a new route listener and registers it with the manager.
+// It filters out any stopped listeners from m.routes before appending the new one
+// to prevent accumulation of stale entries. This ensures startRoute can be called
+// independently without relying on external cleanup (though applyRouteChanges provides
+// more comprehensive pruning for reload scenarios).
 func (m *RouteManager) startRoute(route config.Route) error {
 	listener := m.createListener(route)
 
 	m.mu.Lock()
+	// Filter out stopped listeners before appending the new one
+	activeRoutes := make([]*routeListener, 0, len(m.routes))
+	for _, existing := range m.routes {
+		existing.stateMu.RLock()
+		state := existing.state
+		existing.stateMu.RUnlock()
+		if state != stateStopped {
+			activeRoutes = append(activeRoutes, existing)
+		}
+	}
+	m.routes = activeRoutes
+
 	key := routeKey(route)
 	m.routeMap[key] = listener
 	m.routes = append(m.routes, listener)
@@ -475,6 +493,7 @@ func (m *RouteManager) cleanupStoppedRoutes(keys []string) {
 
 func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 	var errors []error
+	successfulStops := make([]string, 0, len(changes.Removed)+len(changes.Modified))
 
 	routesToStop := make([]string, 0, len(changes.Removed)+len(changes.Modified))
 	routesToStop = append(routesToStop, changes.Removed...)
@@ -491,10 +510,14 @@ func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 				"error", err,
 			)
 			errors = append(errors, fmt.Errorf("%w: %s: %v", ErrRouteStopFailed, key, err))
+		} else {
+			// Only add to successful stops if stopRoute succeeded
+			successfulStops = append(successfulStops, key)
 		}
 	}
 
-	m.cleanupStoppedRoutes(routesToStop)
+	// Only cleanup routes that were successfully stopped
+	m.cleanupStoppedRoutes(successfulStops)
 
 	routesToStart := make([]config.Route, 0, len(changes.Added)+len(changes.Modified))
 	routesToStart = append(routesToStart, changes.Added...)

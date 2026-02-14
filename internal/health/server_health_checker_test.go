@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 )
 
 type mockHealthStore struct {
+	mu       sync.RWMutex
 	statuses map[string]ServerHealthStatus
 }
 
@@ -24,6 +26,9 @@ func newMockHealthStore() *mockHealthStore {
 }
 
 func (m *mockHealthStore) Get(serverID string) ServerHealthStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	status, exists := m.statuses[serverID]
 	if !exists {
 		return ServerHealthStatus{
@@ -35,10 +40,16 @@ func (m *mockHealthStore) Get(serverID string) ServerHealthStatus {
 }
 
 func (m *mockHealthStore) Update(serverID string, status ServerHealthStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.statuses[serverID] = status
 }
 
 func (m *mockHealthStore) GetAll() map[string]ServerHealthStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	result := make(map[string]ServerHealthStatus, len(m.statuses))
 	for k, v := range m.statuses {
 		result[k] = v

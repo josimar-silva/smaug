@@ -536,7 +536,7 @@ just test
 
 ## Documentation
 
-- [ADRs](docs/adrs/INDEX.md) - Comprehensive design decisions, deployment specs, security model, observability strategy
+- [ADRs](docs/adrs/REAME.md) - Comprehensive design decisions, deployment specs, security model, observability strategy
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution process and standards
 
 ---

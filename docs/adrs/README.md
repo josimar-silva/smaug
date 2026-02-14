@@ -35,7 +35,7 @@ When adding a new ADR:
 2. Follow the template from existing ADRs
 3. Keep it concise but thorough
 4. Include code examples where helpful
-5. Add to this INDEX.md
+5. Add to this REAME.md
 6. Link from relevant documentation
 
 ### ADR Template

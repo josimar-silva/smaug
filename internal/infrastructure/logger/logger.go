@@ -16,6 +16,21 @@ const (
 	LevelError Level = "error"
 )
 
+// LevelFrom creates a Level from a string value.
+// Returns LevelInfo if the value is invalid.
+func LevelFrom(s string) Level {
+	switch Level(s) {
+	case LevelDebug:
+		return LevelDebug
+	case LevelWarn:
+		return LevelWarn
+	case LevelError:
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
+
 type LogHandler string
 
 const (
@@ -23,10 +38,23 @@ const (
 	TEXT LogHandler = "text"
 )
 
+// FormatFrom creates a LogHandler from a string value.
+// Returns JSON if the value is invalid.
+func FormatFrom(s string) LogHandler {
+	switch LogHandler(s) {
+	case TEXT:
+		return TEXT
+	default:
+		return JSON
+	}
+}
+
 type Logger struct {
 	logger *slog.Logger
 }
 
+// New creates a new Logger with the specified level, handler type, and output.
+// If output is nil, stdout is used.
 func New(level Level, logHandler LogHandler, output io.Writer) *Logger {
 	if output == nil {
 		output = os.Stdout
@@ -40,6 +68,27 @@ func New(level Level, logHandler LogHandler, output io.Writer) *Logger {
 	return &Logger{
 		logger: slog.New(handler),
 	}
+}
+
+// NewFromEnvs creates a new Logger with settings from environment variables.
+// Uses sensible defaults if environment variables are not set:
+//   - SMAUG_LOG_LEVEL: defaults to "info" (debug, info, warn, error)
+//   - SMAUG_LOG_FORMAT: defaults to "json" (json or text)
+//   - Output: always stdout
+func NewFromEnvs() *Logger {
+	level := getLogLevelFromEnv()
+	format := getLogFormatFromEnv()
+	return New(level, format, nil)
+}
+
+func getLogLevelFromEnv() Level {
+	level := os.Getenv("SMAUG_LOG_LEVEL")
+	return LevelFrom(level)
+}
+
+func getLogFormatFromEnv() LogHandler {
+	format := os.Getenv("SMAUG_LOG_FORMAT")
+	return FormatFrom(format)
 }
 
 func createHandler(handlerType LogHandler, output io.Writer, opts *slog.HandlerOptions) slog.Handler {
@@ -106,4 +155,11 @@ func (l *Logger) WithGroup(name string) *Logger {
 	return &Logger{
 		logger: l.logger.WithGroup(name),
 	}
+}
+
+// Stop performs any necessary cleanup for the logger.
+// This is a no-op for slog-based loggers, but provides a consistent
+// interface for resource management and future enhancements.
+func (l *Logger) Stop() error {
+	return nil
 }

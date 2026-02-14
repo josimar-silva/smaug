@@ -610,3 +610,100 @@ func TestInvalidHandlerTypeDefaultsToJSON(t *testing.T) {
 	assert.Equal(t, "test message", result["msg"])
 	assert.Equal(t, "value", result["key"])
 }
+
+func TestLevelFrom(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected logger.Level
+	}{
+		{
+			name:     "valid debug level",
+			input:    "debug",
+			expected: logger.LevelDebug,
+		},
+		{
+			name:     "valid info level",
+			input:    "info",
+			expected: logger.LevelInfo,
+		},
+		{
+			name:     "valid warn level",
+			input:    "warn",
+			expected: logger.LevelWarn,
+		},
+		{
+			name:     "valid error level",
+			input:    "error",
+			expected: logger.LevelError,
+		},
+		{
+			name:     "invalid level defaults to info",
+			input:    "invalid",
+			expected: logger.LevelInfo,
+		},
+		{
+			name:     "empty string defaults to info",
+			input:    "",
+			expected: logger.LevelInfo,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := logger.LevelFrom(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected logger.LogHandler
+	}{
+		{
+			name:     "valid JSON format",
+			input:    "json",
+			expected: logger.JSON,
+		},
+		{
+			name:     "valid text format",
+			input:    "text",
+			expected: logger.TEXT,
+		},
+		{
+			name:     "invalid format defaults to JSON",
+			input:    "invalid",
+			expected: logger.JSON,
+		},
+		{
+			name:     "empty string defaults to JSON",
+			input:    "",
+			expected: logger.JSON,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := logger.FormatFrom(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNewFromEnvs(t *testing.T) {
+	t.Run("creates logger from environment variables", func(t *testing.T) {
+		log := logger.NewFromEnvs()
+		assert.NotNil(t, log)
+	})
+}
+
+func TestStop(t *testing.T) {
+	buf := &bytes.Buffer{}
+	log := logger.New(logger.LevelInfo, logger.JSON, buf)
+
+	err := log.Stop()
+	assert.NoError(t, err)
+}

@@ -1,13 +1,15 @@
 # Global settings
 settings:
+  # Logging configuration
+  logging:
+    level: info   # info, debug, error
+    format: json  # structured logging
+
+  # Gwaihir configuration (https://github.com/josimar-silva/gwaihir)
   gwaihir:
     url: "http://gwaihir-service.ai.svc.cluster.local"
     apiKey: "${GWAIHIR_API_KEY}"  # Env var substitution
     timeout: 5s
-
-  logging:
-    level: info   # info, debug, error
-    format: json  # structured logging
   
   # Observability configuration
   # Controls which infrastructure endpoints are exposed
@@ -24,16 +26,14 @@ settings:
 
 # Servers definitions
 servers:
-  saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
-
-    wakeOnLan:
+  saruman: # Unique server name
+    
+    wakeOnLan: # WoL configuration
       enabled: true
       timeout: 60s
       debounce: 5s  # Min interval between WoL attempts
 
-    sleepOnLan:
+    sleepOnLan: # Sleep on LAN configuration
       enabled: true
       endpoint: "http://saruman.from-gondor.com:8000/sleep"
       authToken: "${SLEEP_ON_LAN_TOKEN}"  # Env var substitution

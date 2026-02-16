@@ -321,13 +321,13 @@ curl http://localhost:2112/metrics
 
 ```
 internal/
-├── handler/          # HTTP handlers and routes
-├── service/          # Business logic (WoL, routing, health)
-├── store/            # Configuration loading
-├── model/            # Domain models and types
+├── proxy/            # Proxy and routes
+├── store/            # Storage
+├── health/           # Server health checker
 ├── config/           # Configuration parsing
 ├── middleware/       # HTTP middleware
-└── util/             # Logging, metrics, utilities
+└── infrastructure/   # Logging, metrics, etc.
+└── management /      # Server Management
 
 cmd/smaug/            # Application entry point
 tests/                # Integration tests

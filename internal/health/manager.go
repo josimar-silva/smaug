@@ -18,9 +18,9 @@ type HealthManager struct {
 	logger  *logger.Logger
 	workers []*serverWorker
 
-	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	mu     sync.RWMutex
 }
 
 // serverWorker represents a background worker that polls health for a single server.
@@ -69,11 +69,15 @@ func NewHealthManager(cfg *config.Config, store HealthStore, log *logger.Logger)
 //
 // Returns error if the manager is already running.
 func (m *HealthManager) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.cancel != nil {
 		return fmt.Errorf("health manager is already running")
 	}
 
-	m.ctx, m.cancel = context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
 
 	workerCount := 0
 	for serverID, server := range m.config.Servers {
@@ -98,7 +102,7 @@ func (m *HealthManager) Start(ctx context.Context) error {
 		workerCount++
 
 		m.wg.Add(1)
-		go m.runWorker(worker)
+		go m.runWorker(worker, runCtx)
 	}
 
 	m.logger.Info("health check manager started",
@@ -137,7 +141,11 @@ func newWorkerFor(server config.Server, m *HealthManager, serverID string) *serv
 //
 // Returns error if the manager is not running or if shutdown times out.
 func (m *HealthManager) Stop() error {
-	if m.cancel == nil {
+	m.mu.Lock()
+	cancel := m.cancel
+	m.mu.Unlock()
+
+	if cancel == nil {
 		return fmt.Errorf("health manager is not running")
 	}
 
@@ -145,7 +153,7 @@ func (m *HealthManager) Stop() error {
 		"worker_count", len(m.workers),
 	)
 
-	m.cancel()
+	cancel()
 
 	done := make(chan struct{})
 	go func() {
@@ -156,18 +164,22 @@ func (m *HealthManager) Stop() error {
 	select {
 	case <-done:
 		m.logger.Info("health check manager stopped successfully")
+		m.mu.Lock()
 		m.cancel = nil
+		m.mu.Unlock()
 		return nil
 	case <-time.After(5 * time.Second):
 		m.logger.Warn("health check manager shutdown timed out")
+		m.mu.Lock()
 		m.cancel = nil
+		m.mu.Unlock()
 		return fmt.Errorf("shutdown timeout: some workers did not stop in time")
 	}
 }
 
 // runWorker executes the polling loop for a single server.
 // This method runs in its own goroutine and exits when the context is cancelled.
-func (m *HealthManager) runWorker(worker *serverWorker) {
+func (m *HealthManager) runWorker(worker *serverWorker, ctx context.Context) {
 	defer m.wg.Done()
 
 	worker.logger.Debug("health check worker started",
@@ -178,28 +190,28 @@ func (m *HealthManager) runWorker(worker *serverWorker) {
 	ticker := time.NewTicker(worker.interval)
 	defer ticker.Stop()
 
-	m.performCheck(worker)
+	m.performCheck(worker, ctx)
 
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			worker.logger.Debug("health check worker stopping",
 				"server_id", worker.serverID,
 			)
 			return
 		case <-ticker.C:
-			m.performCheck(worker)
+			m.performCheck(worker, ctx)
 		}
 	}
 }
 
 // performCheck executes a single health check for a worker.
-func (m *HealthManager) performCheck(worker *serverWorker) {
-	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+func (m *HealthManager) performCheck(worker *serverWorker, ctx context.Context) {
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	prevStatus := m.store.Get(worker.serverID)
-	newStatus, err := worker.checker.Check(ctx)
+	newStatus, err := worker.checker.Check(checkCtx)
 
 	m.logStateTransition(worker.serverID, prevStatus, newStatus, err)
 }

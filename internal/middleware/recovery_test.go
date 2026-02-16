@@ -44,7 +44,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	assert.Contains(t, logOutput, "stack_trace")
 }
 
-func TestRecoveryMiddleware_NoPanic(t *testing.T) {
+func TestRecoveryMiddlewareNoPanic(t *testing.T) {
 	// Given: A standard logger
 	var buf bytes.Buffer
 	log := logger.New(logger.LevelInfo, logger.JSON, &buf)
@@ -74,7 +74,7 @@ func TestRecoveryMiddleware_NoPanic(t *testing.T) {
 	assert.NotContains(t, logOutput, "panic recovered")
 }
 
-func TestRecoveryMiddleware_PanicWithNonString(t *testing.T) {
+func TestRecoveryMiddlewarePanicWithNonString(t *testing.T) {
 	// Given: A logger to capture output
 	var buf bytes.Buffer
 	log := logger.New(logger.LevelInfo, logger.JSON, &buf)

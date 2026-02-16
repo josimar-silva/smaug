@@ -11,7 +11,7 @@ import (
 )
 
 // TestInMemoryHealthStore_Get_UnknownServer tests that Get returns unhealthy default for unknown servers.
-func TestInMemoryHealthStore_Get_UnknownServer(t *testing.T) {
+func TestInMemoryHealthStoreGetUnknownServer(t *testing.T) {
 	// Given: an empty health store
 	store := NewInMemoryHealthStore()
 
@@ -26,7 +26,7 @@ func TestInMemoryHealthStore_Get_UnknownServer(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_Update_NewServer tests updating a new server's health status.
-func TestInMemoryHealthStore_Update_NewServer(t *testing.T) {
+func TestInMemoryHealthStoreUpdateNewServer(t *testing.T) {
 	// Given: an empty health store
 	store := NewInMemoryHealthStore()
 	now := time.Now()
@@ -49,7 +49,7 @@ func TestInMemoryHealthStore_Update_NewServer(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_Update_ExistingServer tests that Update overwrites existing status.
-func TestInMemoryHealthStore_Update_ExistingServer(t *testing.T) {
+func TestInMemoryHealthStoreUpdateExistingServer(t *testing.T) {
 	// Given: a store with an existing server status
 	store := NewInMemoryHealthStore()
 	firstTime := time.Now()
@@ -78,7 +78,7 @@ func TestInMemoryHealthStore_Update_ExistingServer(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_GetAll_EmptyStore tests GetAll on an empty store.
-func TestInMemoryHealthStore_GetAll_EmptyStore(t *testing.T) {
+func TestInMemoryHealthStoreGetAllEmptyStore(t *testing.T) {
 	// Given: an empty health store
 	store := NewInMemoryHealthStore()
 
@@ -91,7 +91,7 @@ func TestInMemoryHealthStore_GetAll_EmptyStore(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_GetAll_MultipleServers tests GetAll with multiple servers.
-func TestInMemoryHealthStore_GetAll_MultipleServers(t *testing.T) {
+func TestInMemoryHealthStoreGetAllMultipleServers(t *testing.T) {
 	// Given: a store with multiple servers
 	store := NewInMemoryHealthStore()
 	now := time.Now()
@@ -137,7 +137,7 @@ func TestInMemoryHealthStore_GetAll_MultipleServers(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_GetAll_ReturnsSnapshot tests that GetAll returns a copy.
-func TestInMemoryHealthStore_GetAll_ReturnsSnapshot(t *testing.T) {
+func TestInMemoryHealthStoreGetAllReturnsSnapshot(t *testing.T) {
 	// Given: a store with a server
 	store := NewInMemoryHealthStore()
 	store.Update("saruman", health.ServerHealthStatus{
@@ -165,7 +165,7 @@ func TestInMemoryHealthStore_GetAll_ReturnsSnapshot(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_ConcurrentReads tests that concurrent reads don't cause data races.
-func TestInMemoryHealthStore_ConcurrentReads(t *testing.T) {
+func TestInMemoryHealthStoreConcurrentReads(t *testing.T) {
 	// Given: a store with multiple servers
 	store := NewInMemoryHealthStore()
 	for i := 0; i < 10; i++ {
@@ -191,7 +191,7 @@ func TestInMemoryHealthStore_ConcurrentReads(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_ConcurrentWrites tests that concurrent writes are safe.
-func TestInMemoryHealthStore_ConcurrentWrites(t *testing.T) {
+func TestInMemoryHealthStoreConcurrentWrites(t *testing.T) {
 	// Given: an empty store
 	store := NewInMemoryHealthStore()
 
@@ -217,7 +217,7 @@ func TestInMemoryHealthStore_ConcurrentWrites(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_ConcurrentReadWrite tests concurrent reads and writes.
-func TestInMemoryHealthStore_ConcurrentReadWrite(t *testing.T) {
+func TestInMemoryHealthStoreConcurrentReadWrite(t *testing.T) {
 	// Given: a store with some initial data
 	store := NewInMemoryHealthStore()
 	for i := 0; i < 5; i++ {
@@ -269,7 +269,7 @@ func TestInMemoryHealthStore_ConcurrentReadWrite(t *testing.T) {
 }
 
 // TestInMemoryHealthStore_GetAll_ConcurrentAccess tests GetAll during concurrent modifications.
-func TestInMemoryHealthStore_GetAll_ConcurrentAccess(t *testing.T) {
+func TestInMemoryHealthStoreGetAllConcurrentAccess(t *testing.T) {
 	// Given: a store being modified concurrently
 	store := NewInMemoryHealthStore()
 	var wg sync.WaitGroup

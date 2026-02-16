@@ -151,7 +151,7 @@ func TestValidateTimeout(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_MultipleErrors(t *testing.T) {
+func TestConfigValidateMultipleErrors(t *testing.T) {
 	config := &Config{
 		Settings: SettingsConfig{
 			Gwaihir: GwaihirConfig{
@@ -218,7 +218,7 @@ func TestConfigValidate_MultipleErrors(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_ValidConfig(t *testing.T) {
+func TestConfigValidateValidConfig(t *testing.T) {
 	config := &Config{
 		Settings: SettingsConfig{
 			Gwaihir: GwaihirConfig{
@@ -277,7 +277,7 @@ func TestConfigValidate_ValidConfig(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_LoggingLevels(t *testing.T) {
+func TestConfigValidateLoggingLevels(t *testing.T) {
 	tests := []struct {
 		name      string
 		level     string
@@ -311,7 +311,7 @@ func TestConfigValidate_LoggingLevels(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_LoggingFormats(t *testing.T) {
+func TestConfigValidateLoggingFormats(t *testing.T) {
 	tests := []struct {
 		name      string
 		format    string
@@ -343,7 +343,7 @@ func TestConfigValidate_LoggingFormats(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_RouteServerReference(t *testing.T) {
+func TestConfigValidateRouteServerReference(t *testing.T) {
 	tests := []struct {
 		name      string
 		serverRef string
@@ -381,7 +381,7 @@ func TestConfigValidate_RouteServerReference(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_ConditionalValidation(t *testing.T) {
+func TestConfigValidateConditionalValidation(t *testing.T) {
 	t.Run("disabled health check skips port validation", func(t *testing.T) {
 		config := &Config{
 			Settings: SettingsConfig{
@@ -505,7 +505,7 @@ func TestIsValidationError(t *testing.T) {
 	})
 }
 
-func TestValidationErrors_Unwrap(t *testing.T) {
+func TestValidationErrorsUnwrap(t *testing.T) {
 	errs := &ValidationErrors{}
 	err1 := errors.New("error 1")
 	err2 := errors.New("error 2")
@@ -525,7 +525,7 @@ func TestValidationErrors_Unwrap(t *testing.T) {
 	}
 }
 
-func TestValidationErrors_ErrorCount(t *testing.T) {
+func TestValidationErrorsErrorCount(t *testing.T) {
 	tests := []struct {
 		name      string
 		numErrors int

@@ -58,7 +58,7 @@ func (m *mockHealthStore) GetAll() map[string]ServerHealthStatus {
 }
 
 // TestNewServerHealthChecker_ValidParameters tests successful construction.
-func TestNewServerHealthChecker_ValidParameters(t *testing.T) {
+func TestNewServerHealthCheckerValidParameters(t *testing.T) {
 	// Given: valid parameters
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -80,7 +80,7 @@ func TestNewServerHealthChecker_ValidParameters(t *testing.T) {
 }
 
 // TestNewServerHealthChecker_PanicsOnInvalidParameters tests constructor validation.
-func TestNewServerHealthChecker_PanicsOnInvalidParameters(t *testing.T) {
+func TestNewServerHealthCheckerPanicsOnInvalidParameters(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -148,7 +148,7 @@ func TestNewServerHealthChecker_PanicsOnInvalidParameters(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_Success tests successful health check.
-func TestServerHealthChecker_Check_Success(t *testing.T) {
+func TestServerHealthCheckerCheckSuccess(t *testing.T) {
 	// Given: a healthy backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -177,7 +177,7 @@ func TestServerHealthChecker_Check_Success(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_Failure tests failed health check.
-func TestServerHealthChecker_Check_Failure(t *testing.T) {
+func TestServerHealthCheckerCheckFailure(t *testing.T) {
 	// Given: an unhealthy backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -207,7 +207,7 @@ func TestServerHealthChecker_Check_Failure(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_NetworkError tests network failure handling.
-func TestServerHealthChecker_Check_NetworkError(t *testing.T) {
+func TestServerHealthCheckerCheckNetworkError(t *testing.T) {
 	// Given: an unreachable endpoint
 	checker := NewHealthChecker("http://192.0.2.1:9999/health", 100*time.Millisecond, newTestLogger())
 	store := newMockHealthStore()
@@ -230,7 +230,7 @@ func TestServerHealthChecker_Check_NetworkError(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_ContextCancellation tests cancellation handling.
-func TestServerHealthChecker_Check_ContextCancellation(t *testing.T) {
+func TestServerHealthCheckerCheckContextCancellation(t *testing.T) {
 	// Given: a slow backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
@@ -258,7 +258,7 @@ func TestServerHealthChecker_Check_ContextCancellation(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_UpdatesTimestamp tests that timestamps are updated.
-func TestServerHealthChecker_Check_UpdatesTimestamp(t *testing.T) {
+func TestServerHealthCheckerCheckUpdatesTimestamp(t *testing.T) {
 	// Given: a healthy backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -284,7 +284,7 @@ func TestServerHealthChecker_Check_UpdatesTimestamp(t *testing.T) {
 }
 
 // TestServerHealthChecker_Check_TransitionFromHealthyToUnhealthy tests state transitions.
-func TestServerHealthChecker_Check_TransitionFromHealthyToUnhealthy(t *testing.T) {
+func TestServerHealthCheckerCheckTransitionFromHealthyToUnhealthy(t *testing.T) {
 	// Given: a backend that can change state
 	healthy := true
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

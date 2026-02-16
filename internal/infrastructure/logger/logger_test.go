@@ -54,7 +54,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNew_NilOutput(t *testing.T) {
+func TestNewNilOutput(t *testing.T) {
 	log := logger.New(logger.LevelInfo, logger.JSON, nil)
 	assert.NotNil(t, log)
 }

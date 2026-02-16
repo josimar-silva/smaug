@@ -11,6 +11,15 @@ import (
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
 
+// mockRouteStatusProvider is a mock implementation of RouteStatusProvider for testing.
+type mockRouteStatusProvider struct {
+	activeRouteCount int
+}
+
+func (m *mockRouteStatusProvider) GetActiveRouteCount() int {
+	return m.activeRouteCount
+}
+
 func TestRun_InvalidConfigPath(t *testing.T) {
 	configPath := "/nonexistent/path/services.yaml"
 	originalEnv := os.Getenv("SMAUG_CONFIG")

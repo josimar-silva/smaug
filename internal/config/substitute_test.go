@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSubstituteEnv_SimpleVariableSubstitution(t *testing.T) {
+func TestSubstituteEnvSimpleVariableSubstitution(t *testing.T) {
 	// Given: An environment variable is set
 	varName := "TEST_VAR_SIMPLE"
 	varValue := "test-value-123"
@@ -22,7 +22,7 @@ func TestSubstituteEnv_SimpleVariableSubstitution(t *testing.T) {
 	assert.Equal(t, varValue, result)
 }
 
-func TestSubstituteEnv_MultipleVariables(t *testing.T) {
+func TestSubstituteEnvMultipleVariables(t *testing.T) {
 	// Given: Multiple environment variables are set
 	t.Setenv("HOST", "example.com")
 	t.Setenv("PORT", "8080")
@@ -35,7 +35,7 @@ func TestSubstituteEnv_MultipleVariables(t *testing.T) {
 	assert.Equal(t, "http://example.com:8080", result)
 }
 
-func TestSubstituteEnv_WithDefaultValue(t *testing.T) {
+func TestSubstituteEnvWithDefaultValue(t *testing.T) {
 	// Given: An environment variable is NOT set
 	varName := "NONEXISTENT_VAR_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=") // Verify it's not set
@@ -48,7 +48,7 @@ func TestSubstituteEnv_WithDefaultValue(t *testing.T) {
 	assert.Equal(t, "default-value", result)
 }
 
-func TestSubstituteEnv_OverrideDefaultValue(t *testing.T) {
+func TestSubstituteEnvOverrideDefaultValue(t *testing.T) {
 	// Given: An environment variable is set with a default syntax
 	varName := "OVERRIDE_TEST"
 	varValue := "actual-value"
@@ -62,7 +62,7 @@ func TestSubstituteEnv_OverrideDefaultValue(t *testing.T) {
 	assert.Equal(t, varValue, result)
 }
 
-func TestSubstituteEnv_MissingVariableWithoutDefault(t *testing.T) {
+func TestSubstituteEnvMissingVariableWithoutDefault(t *testing.T) {
 	// Given: An environment variable is NOT set and no default is provided
 	varName := "MISSING_VAR_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=")
@@ -75,7 +75,7 @@ func TestSubstituteEnv_MissingVariableWithoutDefault(t *testing.T) {
 	assert.Equal(t, "", result)
 }
 
-func TestSubstituteEnv_NoSubstitution(t *testing.T) {
+func TestSubstituteEnvNoSubstitution(t *testing.T) {
 	// Given: A string with no variable references
 	input := "plain text without variables"
 
@@ -86,7 +86,7 @@ func TestSubstituteEnv_NoSubstitution(t *testing.T) {
 	assert.Equal(t, input, result)
 }
 
-func TestSubstituteEnv_EscapedBraces(t *testing.T) {
+func TestSubstituteEnvEscapedBraces(t *testing.T) {
 	// Given: A string with escaped braces
 	input := "no substitution here"
 
@@ -97,7 +97,7 @@ func TestSubstituteEnv_EscapedBraces(t *testing.T) {
 	assert.Equal(t, input, result)
 }
 
-func TestSubstituteEnv_EmptyVariable(t *testing.T) {
+func TestSubstituteEnvEmptyVariable(t *testing.T) {
 	// Given: An environment variable is set to empty string
 	t.Setenv("EMPTY_VAR", "")
 
@@ -109,7 +109,7 @@ func TestSubstituteEnv_EmptyVariable(t *testing.T) {
 	assert.Equal(t, "", result)
 }
 
-func TestSubstituteEnv_DefaultWithEmptyValue(t *testing.T) {
+func TestSubstituteEnvDefaultWithEmptyValue(t *testing.T) {
 	// Given: An environment variable is set to empty string, with default syntax
 	t.Setenv("EMPTY_WITH_DEFAULT", "")
 
@@ -121,7 +121,7 @@ func TestSubstituteEnv_DefaultWithEmptyValue(t *testing.T) {
 	assert.Equal(t, "", result)
 }
 
-func TestSubstituteEnv_DefaultWithMissingVariable(t *testing.T) {
+func TestSubstituteEnvDefaultWithMissingVariable(t *testing.T) {
 	// Given: An environment variable is NOT set, with default syntax
 	varName := "MISSING_WITH_DEFAULT_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=")
@@ -134,7 +134,7 @@ func TestSubstituteEnv_DefaultWithMissingVariable(t *testing.T) {
 	assert.Equal(t, "my-default", result)
 }
 
-func TestSubstituteEnv_ComplexDefaultValue(t *testing.T) {
+func TestSubstituteEnvComplexDefaultValue(t *testing.T) {
 	// Given: A variable not set, but with a complex default
 	varName := "MISSING_COMPLEX_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=")
@@ -147,7 +147,7 @@ func TestSubstituteEnv_ComplexDefaultValue(t *testing.T) {
 	assert.Equal(t, "http://localhost:8080/path", result)
 }
 
-func TestSubstituteEnv_VariableInMiddleOfString(t *testing.T) {
+func TestSubstituteEnvVariableInMiddleOfString(t *testing.T) {
 	// Given: An environment variable is set
 	t.Setenv("SERVICE_NAME", "myapp")
 
@@ -159,7 +159,7 @@ func TestSubstituteEnv_VariableInMiddleOfString(t *testing.T) {
 	assert.Equal(t, "http://localhost/myapp/api", result)
 }
 
-func TestSubstituteEnv_VariableAtStart(t *testing.T) {
+func TestSubstituteEnvVariableAtStart(t *testing.T) {
 	// Given: An environment variable is set
 	t.Setenv("PROTOCOL", "https")
 
@@ -171,7 +171,7 @@ func TestSubstituteEnv_VariableAtStart(t *testing.T) {
 	assert.Equal(t, "https://example.com", result)
 }
 
-func TestSubstituteEnv_VariableAtEnd(t *testing.T) {
+func TestSubstituteEnvVariableAtEnd(t *testing.T) {
 	// Given: An environment variable is set
 	t.Setenv("DOMAIN", "example.com")
 
@@ -183,7 +183,7 @@ func TestSubstituteEnv_VariableAtEnd(t *testing.T) {
 	assert.Equal(t, "https://example.com", result)
 }
 
-func TestSubstituteEnv_OnlyVariable(t *testing.T) {
+func TestSubstituteEnvOnlyVariable(t *testing.T) {
 	// Given: An environment variable is set
 	t.Setenv("API_KEY", "secret-key-123")
 
@@ -195,7 +195,7 @@ func TestSubstituteEnv_OnlyVariable(t *testing.T) {
 	assert.Equal(t, "secret-key-123", result)
 }
 
-func TestSubstituteEnv_DefaultOnlyVariable(t *testing.T) {
+func TestSubstituteEnvDefaultOnlyVariable(t *testing.T) {
 	// Given: A variable is not set, with default syntax
 	varName := "MISSING_ONLY_VAR_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=")
@@ -208,7 +208,7 @@ func TestSubstituteEnv_DefaultOnlyVariable(t *testing.T) {
 	assert.Equal(t, "default-only", result)
 }
 
-func TestSubstituteEnv_ConsecutiveVariables(t *testing.T) {
+func TestSubstituteEnvConsecutiveVariables(t *testing.T) {
 	// Given: Multiple environment variables are set
 	t.Setenv("FIRST", "one")
 	t.Setenv("SECOND", "two")
@@ -221,7 +221,7 @@ func TestSubstituteEnv_ConsecutiveVariables(t *testing.T) {
 	assert.Equal(t, "onetwo", result)
 }
 
-func TestSubstituteEnv_VariableNameCase(t *testing.T) {
+func TestSubstituteEnvVariableNameCase(t *testing.T) {
 	// Given: An environment variable is set with uppercase name
 	t.Setenv("MY_VAR", "value123")
 
@@ -233,7 +233,7 @@ func TestSubstituteEnv_VariableNameCase(t *testing.T) {
 	assert.Equal(t, "value123", result)
 }
 
-func TestSubstituteEnv_SpecialCharsInDefault(t *testing.T) {
+func TestSubstituteEnvSpecialCharsInDefault(t *testing.T) {
 	// Given: A variable is not set
 	varName := "SPECIAL_CHARS_" + t.Name()
 	require.NotContains(t, os.Environ(), varName+"=")

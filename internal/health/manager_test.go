@@ -16,7 +16,7 @@ import (
 )
 
 // TestNewHealthManager_ValidParameters tests successful construction.
-func TestNewHealthManager_ValidParameters(t *testing.T) {
+func TestNewHealthManagerValidParameters(t *testing.T) {
 	// Given: valid parameters
 	cfg := &config.Config{
 		Servers: make(map[string]config.Server),
@@ -36,7 +36,7 @@ func TestNewHealthManager_ValidParameters(t *testing.T) {
 }
 
 // TestNewHealthManager_PanicsOnInvalidParameters tests constructor validation.
-func TestNewHealthManager_PanicsOnInvalidParameters(t *testing.T) {
+func TestNewHealthManagerPanicsOnInvalidParameters(t *testing.T) {
 	cfg := &config.Config{}
 	store := newMockHealthStore()
 	log := newTestLogger()
@@ -77,7 +77,7 @@ func TestNewHealthManager_PanicsOnInvalidParameters(t *testing.T) {
 }
 
 // TestHealthManager_Start_NoServers tests starting with no servers configured.
-func TestHealthManager_Start_NoServers(t *testing.T) {
+func TestHealthManagerStartNoServers(t *testing.T) {
 	// Given: config with no servers
 	cfg := &config.Config{
 		Servers: make(map[string]config.Server),
@@ -98,7 +98,7 @@ func TestHealthManager_Start_NoServers(t *testing.T) {
 }
 
 // TestHealthManager_Start_SkipsServersWithoutEndpoint tests that servers without endpoints are skipped.
-func TestHealthManager_Start_SkipsServersWithoutEndpoint(t *testing.T) {
+func TestHealthManagerStartSkipsServersWithoutEndpoint(t *testing.T) {
 	// Given: servers with and without health check endpoints
 	cfg := &config.Config{
 		Servers: map[string]config.Server{
@@ -135,7 +135,7 @@ func TestHealthManager_Start_SkipsServersWithoutEndpoint(t *testing.T) {
 }
 
 // TestHealthManager_Start_SkipsServersWithInvalidInterval tests validation of interval.
-func TestHealthManager_Start_SkipsServersWithInvalidInterval(t *testing.T) {
+func TestHealthManagerStartSkipsServersWithInvalidInterval(t *testing.T) {
 	// Given: server with invalid interval
 	cfg := &config.Config{
 		Servers: map[string]config.Server{
@@ -164,7 +164,7 @@ func TestHealthManager_Start_SkipsServersWithInvalidInterval(t *testing.T) {
 }
 
 // TestHealthManager_Start_AlreadyRunning tests that Start returns error if already running.
-func TestHealthManager_Start_AlreadyRunning(t *testing.T) {
+func TestHealthManagerStartAlreadyRunning(t *testing.T) {
 	// Given: a running manager
 	cfg := &config.Config{
 		Servers: make(map[string]config.Server),
@@ -188,7 +188,7 @@ func TestHealthManager_Start_AlreadyRunning(t *testing.T) {
 }
 
 // TestHealthManager_Stop_NotRunning tests that Stop returns error if not running.
-func TestHealthManager_Stop_NotRunning(t *testing.T) {
+func TestHealthManagerStopNotRunning(t *testing.T) {
 	// Given: a manager that hasn't been started
 	cfg := &config.Config{
 		Servers: make(map[string]config.Server),
@@ -205,7 +205,7 @@ func TestHealthManager_Stop_NotRunning(t *testing.T) {
 }
 
 // TestHealthManager_WorkerPolling tests that workers poll at the configured interval.
-func TestHealthManager_WorkerPolling(t *testing.T) {
+func TestHealthManagerWorkerPolling(t *testing.T) {
 	// Given: a backend that tracks requests
 	var requestCount atomic.Int32
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +251,7 @@ func TestHealthManager_WorkerPolling(t *testing.T) {
 }
 
 // TestHealthManager_WorkerStopsOnContextCancel tests graceful shutdown.
-func TestHealthManager_WorkerStopsOnContextCancel(t *testing.T) {
+func TestHealthManagerWorkerStopsOnContextCancel(t *testing.T) {
 	// Given: a running manager
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -289,7 +289,7 @@ func TestHealthManager_WorkerStopsOnContextCancel(t *testing.T) {
 }
 
 // TestHealthManager_MultipleWorkers tests managing multiple server workers.
-func TestHealthManager_MultipleWorkers(t *testing.T) {
+func TestHealthManagerMultipleWorkers(t *testing.T) {
 	// Given: multiple backends
 	backend1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -347,7 +347,7 @@ func TestHealthManager_MultipleWorkers(t *testing.T) {
 }
 
 // TestHealthManager_StateTransitions tests that state transitions are tracked.
-func TestHealthManager_StateTransitions(t *testing.T) {
+func TestHealthManagerStateTransitions(t *testing.T) {
 	// Given: a backend that can change state
 	var healthy atomic.Bool
 	healthy.Store(true)
@@ -409,7 +409,7 @@ func TestHealthManager_StateTransitions(t *testing.T) {
 }
 
 // TestHealthManager_ImmediateInitialCheck tests that first check happens immediately.
-func TestHealthManager_ImmediateInitialCheck(t *testing.T) {
+func TestHealthManagerImmediateInitialCheck(t *testing.T) {
 	// Given: a backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

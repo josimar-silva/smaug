@@ -20,7 +20,7 @@ func newTestLogger() *logger.Logger {
 }
 
 // TestHealthChecker_CheckHealth_Success tests that a 200 OK response returns no error.
-func TestHealthChecker_CheckHealth_Success(t *testing.T) {
+func TestHealthCheckerCheckHealthSuccess(t *testing.T) {
 	// Given: a backend server that returns 200 OK
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -38,7 +38,7 @@ func TestHealthChecker_CheckHealth_Success(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_SuccessRange tests that status codes 200-399 are considered healthy.
-func TestHealthChecker_CheckHealth_SuccessRange(t *testing.T) {
+func TestHealthCheckerCheckHealthSuccessRange(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
@@ -73,7 +73,7 @@ func TestHealthChecker_CheckHealth_SuccessRange(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_Failure tests that status codes 400+ and 500+ return an error.
-func TestHealthChecker_CheckHealth_Failure(t *testing.T) {
+func TestHealthCheckerCheckHealthFailure(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
@@ -108,7 +108,7 @@ func TestHealthChecker_CheckHealth_Failure(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_Timeout tests that requests exceeding 2s timeout fail.
-func TestHealthChecker_CheckHealth_Timeout(t *testing.T) {
+func TestHealthCheckerCheckHealthTimeout(t *testing.T) {
 	// Given: a backend server that takes longer than 2s to respond
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
@@ -131,7 +131,7 @@ func TestHealthChecker_CheckHealth_Timeout(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_FollowRedirects tests that up to 3 redirects are followed.
-func TestHealthChecker_CheckHealth_FollowRedirects(t *testing.T) {
+func TestHealthCheckerCheckHealthFollowRedirects(t *testing.T) {
 	redirectCount := 0
 
 	// Given: a backend server that redirects 3 times before returning 200 OK
@@ -158,7 +158,7 @@ func TestHealthChecker_CheckHealth_FollowRedirects(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_TooManyRedirects tests that more than 3 redirects fail.
-func TestHealthChecker_CheckHealth_TooManyRedirects(t *testing.T) {
+func TestHealthCheckerCheckHealthTooManyRedirects(t *testing.T) {
 	// Given: a backend server that redirects more than 3 times
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "/redirect")
@@ -178,7 +178,7 @@ func TestHealthChecker_CheckHealth_TooManyRedirects(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_InvalidURL tests that invalid URLs return an error.
-func TestHealthChecker_CheckHealth_InvalidURL(t *testing.T) {
+func TestHealthCheckerCheckHealthInvalidURL(t *testing.T) {
 	tests := []struct {
 		name string
 		url  string
@@ -204,7 +204,7 @@ func TestHealthChecker_CheckHealth_InvalidURL(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_ContextCancellation tests that context cancellation stops the request.
-func TestHealthChecker_CheckHealth_ContextCancellation(t *testing.T) {
+func TestHealthCheckerCheckHealthContextCancellation(t *testing.T) {
 	// Given: a backend server that takes a while to respond
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Second)
@@ -225,7 +225,7 @@ func TestHealthChecker_CheckHealth_ContextCancellation(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_UsesGETMethod tests that the checker uses GET method.
-func TestHealthChecker_CheckHealth_UsesGETMethod(t *testing.T) {
+func TestHealthCheckerCheckHealthUsesGETMethod(t *testing.T) {
 	methodUsed := ""
 
 	// Given: a backend server that captures the HTTP method
@@ -247,7 +247,7 @@ func TestHealthChecker_CheckHealth_UsesGETMethod(t *testing.T) {
 }
 
 // TestHealthChecker_CheckHealth_UnreachableServer tests behavior when server is unreachable.
-func TestHealthChecker_CheckHealth_UnreachableServer(t *testing.T) {
+func TestHealthCheckerCheckHealthUnreachableServer(t *testing.T) {
 	// Given: an unreachable server address
 	checker := NewHealthChecker("http://127.0.0.1:1", 2*time.Second, newTestLogger())
 	ctx := context.Background()

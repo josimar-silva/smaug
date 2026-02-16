@@ -456,7 +456,7 @@ func (m *RouteManager) startRoute(route config.Route) error {
 
 func updateActiveRoutes(m *RouteManager, route config.Route, listener *routeListener) {
 	m.mu.Lock()
-	
+
 	activeRoutes := make([]*routeListener, 0, len(m.routes))
 	for _, existing := range m.routes {
 		existing.stateMu.RLock()

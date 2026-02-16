@@ -20,7 +20,7 @@ type HealthManager struct {
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	mu     sync.RWMutex
+	mu     sync.Mutex
 }
 
 // serverWorker represents a background worker that polls health for a single server.
@@ -144,12 +144,14 @@ func newWorkerFor(server config.Server, m *HealthManager, serverID string) *serv
 // Returns error if the manager is not running or if shutdown times out.
 func (m *HealthManager) Stop() error {
 	m.mu.Lock()
-	cancel := m.cancel
-	m.mu.Unlock()
-
-	if cancel == nil {
+	if m.cancel == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("health manager is not running")
 	}
+
+	cancel := m.cancel
+	m.cancel = nil
+	m.mu.Unlock()
 
 	m.logger.Info("stopping health check manager",
 		"worker_count", len(m.workers),
@@ -166,15 +168,9 @@ func (m *HealthManager) Stop() error {
 	select {
 	case <-done:
 		m.logger.Info("health check manager stopped successfully")
-		m.mu.Lock()
-		m.cancel = nil
-		m.mu.Unlock()
 		return nil
 	case <-time.After(5 * time.Second):
 		m.logger.Warn("health check manager shutdown timed out")
-		m.mu.Lock()
-		m.cancel = nil
-		m.mu.Unlock()
 		return fmt.Errorf("shutdown timeout: some workers did not stop in time")
 	}
 }

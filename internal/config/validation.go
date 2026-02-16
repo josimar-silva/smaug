@@ -115,50 +115,48 @@ func (c *Config) validateServers(errs *ValidationErrors) {
 	for name, server := range c.Servers {
 		errs.Add(validateMAC(server.MAC, fmt.Sprintf("servers.%s.mac", name)))
 		errs.Add(validateIP(server.Broadcast, fmt.Sprintf("servers.%s.broadcast", name)))
-		c.validateWakeOnLan(errs, name, server)
-		c.validateSleepOnLan(errs, name, server)
-		c.validateHealthCheck(errs, name, server)
+		server.validateWakeOnLan(errs, name)
+		server.validateSleepOnLan(errs, name)
+		server.validateHealthCheck(errs, name)
 	}
 }
 
-func (c *Config) validateWakeOnLan(errs *ValidationErrors, name string, server Server) {
+func (server *Server) validateWakeOnLan(errs *ValidationErrors, name string) {
 	if !server.WakeOnLan.Enabled {
 		return
 	}
 
-	// Skip validation for unset timeouts (zero = use default behavior)
 	if server.WakeOnLan.Timeout != 0 {
 		errs.Add(validateTimeout(server.WakeOnLan.Timeout, fmt.Sprintf("servers.%s.wakeOnLan.timeout", name)))
 	}
-	// Skip validation for unset debounce (zero = use default behavior)
+
 	if server.WakeOnLan.Debounce != 0 {
 		errs.Add(validateTimeout(server.WakeOnLan.Debounce, fmt.Sprintf("servers.%s.wakeOnLan.debounce", name)))
 	}
 }
 
-func (c *Config) validateSleepOnLan(errs *ValidationErrors, name string, server Server) {
+func (server *Server) validateSleepOnLan(errs *ValidationErrors, name string) {
 	if !server.SleepOnLan.Enabled {
 		return
 	}
 
 	errs.Add(validateURL(server.SleepOnLan.Endpoint, fmt.Sprintf("servers.%s.sleepOnLan.endpoint", name)))
-	// Skip validation for unset idle timeout (zero = use default behavior)
 	if server.SleepOnLan.IdleTimeout != 0 {
 		errs.Add(validateTimeout(server.SleepOnLan.IdleTimeout, fmt.Sprintf("servers.%s.sleepOnLan.idleTimeout", name)))
 	}
 }
 
-func (c *Config) validateHealthCheck(errs *ValidationErrors, name string, server Server) {
+func (server *Server) validateHealthCheck(errs *ValidationErrors, name string) {
 	if server.HealthCheck.Endpoint == "" {
 		return
 	}
 
 	errs.Add(validateURL(server.HealthCheck.Endpoint, fmt.Sprintf("servers.%s.healthCheck.endpoint", name)))
-	// Skip validation for unset health check interval (zero = use default behavior)
+
 	if server.HealthCheck.Interval != 0 {
 		errs.Add(validateTimeout(server.HealthCheck.Interval, fmt.Sprintf("servers.%s.healthCheck.interval", name)))
 	}
-	// Skip validation for unset health check timeout (zero = use default behavior)
+
 	if server.HealthCheck.Timeout != 0 {
 		errs.Add(validateTimeout(server.HealthCheck.Timeout, fmt.Sprintf("servers.%s.healthCheck.timeout", name)))
 	}

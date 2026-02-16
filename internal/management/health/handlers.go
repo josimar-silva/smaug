@@ -26,11 +26,10 @@ func NewHealthHandler(provider RouteStatusProvider, versionInfo VersionInfo, log
 		uptime := time.Since(startTime).Round(time.Second)
 
 		response := ApplicationHealth{
-			Status:            "healthy",
-			Version:           versionInfo.Version,
-			ActiveRoutes:      provider.GetActiveRouteCount(),
-			ConfiguredServers: 0, // TODO: Add when server count is available
-			Uptime:            uptime.String(),
+			Status:       "healthy",
+			Version:      versionInfo.Version,
+			ActiveRoutes: provider.GetActiveRouteCount(),
+			Uptime:       uptime.String(),
 		}
 
 		w.Header().Set(headerContentType, contentTypeJSON)

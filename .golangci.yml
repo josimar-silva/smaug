@@ -25,7 +25,6 @@ linters:
     - gosec
     - misspell
     - nakedret
-    - noctx
     - nolintlint
     - unconvert
     - unparam

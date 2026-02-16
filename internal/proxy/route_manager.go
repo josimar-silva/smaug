@@ -455,6 +455,7 @@ func (m *RouteManager) startRoute(route config.Route) error {
 }
 
 // updateActiveRoutes filters out stopped routes and registers a new listener.
+// Also removes stale entries from m.routeMap for any stopped listeners.
 func (m *RouteManager) updateActiveRoutes(route config.Route, listener *routeListener) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -466,6 +467,10 @@ func (m *RouteManager) updateActiveRoutes(route config.Route, listener *routeLis
 		existing.stateMu.RUnlock()
 		if state != stateStopped {
 			activeRoutes = append(activeRoutes, existing)
+		} else {
+			// Clean up stale routeMap entry for stopped listener
+			key := routeKey(existing.route)
+			delete(m.routeMap, key)
 		}
 	}
 	m.routes = activeRoutes

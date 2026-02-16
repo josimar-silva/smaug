@@ -2,11 +2,10 @@ package health
 
 // ApplicationHealth represents the overall health status of the application.
 type ApplicationHealth struct {
-	Status            string `json:"status"`
-	Version           string `json:"version"`
-	ActiveRoutes      int    `json:"activeRoutes"`
-	ConfiguredServers int    `json:"configuredServers"`
-	Uptime            string `json:"uptime"`
+	Status       string `json:"status"`
+	Version      string `json:"version"`
+	ActiveRoutes int    `json:"activeRoutes"`
+	Uptime       string `json:"uptime"`
 }
 
 // LivenessResponse represents the response for the liveness probe.

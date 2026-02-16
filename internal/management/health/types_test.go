@@ -13,11 +13,10 @@ import (
 func TestApplicationHealthMarshalsToJSON(t *testing.T) {
 	// Given: an ApplicationHealth struct with all fields populated
 	appHealth := health.ApplicationHealth{
-		Status:            "healthy",
-		Version:           "0.1.0-SNAPSHOT",
-		ActiveRoutes:      3,
-		ConfiguredServers: 5,
-		Uptime:            "1h30m45s",
+		Status:       "healthy",
+		Version:      "0.1.0-SNAPSHOT",
+		ActiveRoutes: 3,
+		Uptime:       "1h30m45s",
 	}
 
 	// When: marshalling to JSON
@@ -33,7 +32,6 @@ func TestApplicationHealthMarshalsToJSON(t *testing.T) {
 	assert.Equal(t, "healthy", result["status"])
 	assert.Equal(t, "0.1.0-SNAPSHOT", result["version"])
 	assert.Equal(t, float64(3), result["activeRoutes"])
-	assert.Equal(t, float64(5), result["configuredServers"])
 	assert.Equal(t, "1h30m45s", result["uptime"])
 }
 

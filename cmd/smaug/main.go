@@ -10,6 +10,7 @@ import (
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	mgmhealth "github.com/josimar-silva/smaug/internal/management/health"
 	"github.com/josimar-silva/smaug/internal/middleware"
 	"github.com/josimar-silva/smaug/internal/proxy"
 	"github.com/josimar-silva/smaug/internal/store"

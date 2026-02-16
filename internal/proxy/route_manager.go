@@ -302,6 +302,24 @@ func (m *RouteManager) GetActiveRoutes() []RouteInfo {
 	return info
 }
 
+// GetActiveRouteCount returns the number of routes currently in the running state.
+// This excludes routes that are failed, stopped, or in any other non-running state.
+func (m *RouteManager) GetActiveRouteCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, listener := range m.routes {
+		listener.stateMu.RLock()
+		if listener.state == stateRunning {
+			count++
+		}
+		listener.stateMu.RUnlock()
+	}
+
+	return count
+}
+
 func (m *RouteManager) createListener(route config.Route) *routeListener {
 	proxyHandler := NewProxyHandler(route.Upstream, m.logger)
 	wrappedHandler := m.middleware(proxyHandler)

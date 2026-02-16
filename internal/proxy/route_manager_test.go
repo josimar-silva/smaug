@@ -894,3 +894,172 @@ func TestRunListenerStartupFailure(t *testing.T) {
 
 	_ = rm.Stop()
 }
+
+func TestGetActiveRouteCountReturnsZeroWhenNotStarted(t *testing.T) {
+	// Given: A route manager that has not been started
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Name: "test1", Listen: 18201, Upstream: "http://localhost:8001", Server: "server1"},
+			{Name: "test2", Listen: 18202, Upstream: "http://localhost:8002", Server: "server2"},
+			{Name: "test3", Listen: 18203, Upstream: "http://localhost:8003", Server: "server3"},
+		},
+	}
+	configMgr := createTestConfigManager(t, cfg)
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	// When: Getting active route count before start
+	count := rm.GetActiveRouteCount()
+
+	// Then: Count should be 0
+	if count != 0 {
+		t.Errorf("expected 0 active routes, got %d", count)
+	}
+}
+
+func TestGetActiveRouteCountReturnsCorrectCountWhenRunning(t *testing.T) {
+	// Given: A route manager with 3 routes started
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Name: "test1", Listen: 18211, Upstream: "http://localhost:8011", Server: "server1"},
+			{Name: "test2", Listen: 18212, Upstream: "http://localhost:8012", Server: "server2"},
+			{Name: "test3", Listen: 18213, Upstream: "http://localhost:8013", Server: "server3"},
+		},
+	}
+	configMgr := createTestConfigManager(t, cfg)
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	err = rm.Start(ctx)
+	if err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = rm.Stop()
+	})
+
+	// Give routes time to start and reach running state
+	time.Sleep(250 * time.Millisecond)
+
+	// When: Getting active route count
+	count := rm.GetActiveRouteCount()
+
+	// Then: Count should be 3
+	if count != 3 {
+		t.Errorf("expected 3 active routes, got %d", count)
+	}
+}
+
+func TestGetActiveRouteCountReturnsZeroAfterStop(t *testing.T) {
+	// Given: A route manager that was started and then stopped
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Name: "test1", Listen: 18221, Upstream: "http://localhost:8021", Server: "server1"},
+			{Name: "test2", Listen: 18222, Upstream: "http://localhost:8022", Server: "server2"},
+		},
+	}
+	configMgr := createTestConfigManager(t, cfg)
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	ctx := context.Background()
+	err = rm.Start(ctx)
+	if err != nil {
+		t.Fatalf("failed to start route manager: %v", err)
+	}
+
+	// Give routes time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop the route manager
+	err = rm.Stop()
+	if err != nil {
+		t.Fatalf("failed to stop route manager: %v", err)
+	}
+
+	// When: Getting active route count after stop
+	count := rm.GetActiveRouteCount()
+
+	// Then: Count should be 0
+	if count != 0 {
+		t.Errorf("expected 0 active routes after stop, got %d", count)
+	}
+}
+
+func TestGetActiveRouteCountExcludesFailedRoutes(t *testing.T) {
+	// Given: A route manager with one route that will fail (port already bound)
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Name: "working", Listen: 18231, Upstream: "http://localhost:8031", Server: "server1"},
+			{Name: "failing", Listen: 18232, Upstream: "http://localhost:8032", Server: "server2"},
+		},
+	}
+	configMgr := createTestConfigManager(t, cfg)
+	log := logger.New(logger.LevelInfo, logger.JSON, nil)
+	mw := middleware.Chain()
+	healthStore := store.NewInMemoryHealthStore()
+
+	rm, err := NewRouteManager(configMgr, log, mw, healthStore)
+	if err != nil {
+		t.Fatalf("failed to create route manager: %v", err)
+	}
+
+	// Block port 18232 to cause the failing route to fail
+	blockingServer := &http.Server{
+		Addr:              ":18232",
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	blockingDone := make(chan struct{})
+	go func() {
+		_ = blockingServer.ListenAndServe()
+		close(blockingDone)
+	}()
+
+	t.Cleanup(func() {
+		_ = blockingServer.Close()
+		_ = rm.Stop()
+		select {
+		case <-blockingDone:
+		case <-time.After(time.Second):
+		}
+	})
+
+	// Give blocking server time to start
+	time.Sleep(50 * time.Millisecond)
+
+	ctx := context.Background()
+	_ = rm.Start(ctx)
+
+	// Give routes time to start/fail
+	time.Sleep(200 * time.Millisecond)
+
+	// When: Getting active route count
+	count := rm.GetActiveRouteCount()
+
+	// Then: Count should be 1 (only the working route)
+	if count != 1 {
+		t.Errorf("expected 1 active route (failed route should not count), got %d", count)
+	}
+}

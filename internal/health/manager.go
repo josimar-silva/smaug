@@ -27,6 +27,7 @@ type HealthManager struct {
 type serverWorker struct {
 	serverID string
 	interval time.Duration
+	timeout  time.Duration
 	checker  *ServerHealthChecker
 	logger   *logger.Logger
 }
@@ -102,7 +103,7 @@ func (m *HealthManager) Start(ctx context.Context) error {
 		workerCount++
 
 		m.wg.Add(1)
-		go m.runWorker(worker, runCtx)
+		go m.runWorker(runCtx, worker)
 	}
 
 	m.logger.Info("health check manager started",
@@ -129,6 +130,7 @@ func newWorkerFor(server config.Server, m *HealthManager, serverID string) *serv
 	worker := &serverWorker{
 		serverID: serverID,
 		interval: server.HealthCheck.Interval,
+		timeout:  server.HealthCheck.Timeout,
 		checker:  serverChecker,
 		logger:   m.logger,
 	}
@@ -179,7 +181,7 @@ func (m *HealthManager) Stop() error {
 
 // runWorker executes the polling loop for a single server.
 // This method runs in its own goroutine and exits when the context is cancelled.
-func (m *HealthManager) runWorker(worker *serverWorker, ctx context.Context) {
+func (m *HealthManager) runWorker(ctx context.Context, worker *serverWorker) {
 	defer m.wg.Done()
 
 	worker.logger.Debug("health check worker started",
@@ -190,7 +192,7 @@ func (m *HealthManager) runWorker(worker *serverWorker, ctx context.Context) {
 	ticker := time.NewTicker(worker.interval)
 	defer ticker.Stop()
 
-	m.performCheck(worker, ctx)
+	m.performCheck(ctx, worker)
 
 	for {
 		select {
@@ -200,14 +202,20 @@ func (m *HealthManager) runWorker(worker *serverWorker, ctx context.Context) {
 			)
 			return
 		case <-ticker.C:
-			m.performCheck(worker, ctx)
+			m.performCheck(ctx, worker)
 		}
 	}
 }
 
 // performCheck executes a single health check for a worker.
-func (m *HealthManager) performCheck(worker *serverWorker, ctx context.Context) {
-	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+// Uses the configured health check timeout for the context deadline.
+func (m *HealthManager) performCheck(ctx context.Context, worker *serverWorker) {
+	checkTimeout := worker.timeout
+	if checkTimeout <= 0 {
+		checkTimeout = 30 * time.Second // Default fallback if not configured
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 
 	prevStatus := m.store.Get(worker.serverID)

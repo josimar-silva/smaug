@@ -423,7 +423,7 @@ func (m *RouteManager) stopRoute(key string) error {
 func (m *RouteManager) startRoute(route config.Route) error {
 	listener := m.createListener(route)
 
-	updateActiveRoutes(m, route, listener)
+	m.updateActiveRoutes(route, listener)
 
 	m.wg.Add(1)
 	go m.runListener(listener)
@@ -454,8 +454,10 @@ func (m *RouteManager) startRoute(route config.Route) error {
 	return nil
 }
 
-func updateActiveRoutes(m *RouteManager, route config.Route, listener *routeListener) {
+// updateActiveRoutes filters out stopped routes and registers a new listener.
+func (m *RouteManager) updateActiveRoutes(route config.Route, listener *routeListener) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	activeRoutes := make([]*routeListener, 0, len(m.routes))
 	for _, existing := range m.routes {
@@ -471,8 +473,6 @@ func updateActiveRoutes(m *RouteManager, route config.Route, listener *routeList
 	key := routeKey(route)
 	m.routeMap[key] = listener
 	m.routes = append(m.routes, listener)
-
-	m.mu.Unlock()
 }
 
 func (m *RouteManager) cleanupStoppedRoutes(keys []string) {

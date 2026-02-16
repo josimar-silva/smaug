@@ -19,36 +19,16 @@ Smaug uses a **simplified layered architecture** that's pragmatic and maintainab
 
 ```
 internal/
-├── handler/          # HTTP handlers (routes, request handling)
-├── service/          # Business logic (WoL, routing, proxying)
-├── store/            # Data access (configuration, storage)
-├── model/            # Domain models & types
-├── config/           # Configuration loading & parsing
-├── middleware/       # HTTP middleware (logging, auth, etc)
-└── util/             # Utilities (logger, metrics, health checks)
+├── proxy/            # Proxy and routes
+├── store/            # Storage
+├── health/           # Server health checker
+├── config/           # Configuration parsing
+├── middleware/       # HTTP middleware
+└── infrastructure/   # Logging, metrics, etc.
+└── management /      # Server Management
 
 cmd/smaug/            # Application entrypoint
 ```
-
-### Dependency Flow
-
-Keep dependencies flowing in one direction:
-
-```
-handler → service → store
-            ↓
-          model
-            ↓
-          config, util
-```
-
-**Guidelines:**
-- Handlers call services, services call stores
-- Models are simple data structures (no heavy validation)
-- Stores implement basic CRUD/access patterns
-- Services contain business logic
-- Only use interfaces where you need them (stores for multiple backends, external services)
-- Avoid interface-per-type thinking - interface when you have 2+ implementations
 
 ## Code Conventions
 

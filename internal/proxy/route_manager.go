@@ -59,7 +59,6 @@ type RouteManager struct {
 
 	routes          []*routeListener
 	routeMap        map[string]*routeListener
-	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	mu              sync.RWMutex
@@ -184,7 +183,8 @@ func (m *RouteManager) Start(ctx context.Context) error {
 		return fmt.Errorf("%w: config manager returned nil config", ErrReloadFailed)
 	}
 
-	m.ctx, m.cancel = context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
 	m.routes = make([]*routeListener, 0, len(cfg.Routes))
 
 	for _, route := range cfg.Routes {
@@ -201,7 +201,7 @@ func (m *RouteManager) Start(ctx context.Context) error {
 		"total_routes", len(cfg.Routes),
 	)
 
-	go m.watchConfigReloads()
+	go m.watchConfigReloads(runCtx)
 
 	return nil
 }
@@ -423,28 +423,11 @@ func (m *RouteManager) stopRoute(key string) error {
 func (m *RouteManager) startRoute(route config.Route) error {
 	listener := m.createListener(route)
 
-	m.mu.Lock()
-	// Filter out stopped listeners before appending the new one
-	activeRoutes := make([]*routeListener, 0, len(m.routes))
-	for _, existing := range m.routes {
-		existing.stateMu.RLock()
-		state := existing.state
-		existing.stateMu.RUnlock()
-		if state != stateStopped {
-			activeRoutes = append(activeRoutes, existing)
-		}
-	}
-	m.routes = activeRoutes
-
-	key := routeKey(route)
-	m.routeMap[key] = listener
-	m.routes = append(m.routes, listener)
-	m.mu.Unlock()
+	updateActiveRoutes(m, route, listener)
 
 	m.wg.Add(1)
 	go m.runListener(listener)
 
-	// Wait for listener to reach running or failed state (with timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -469,6 +452,27 @@ func (m *RouteManager) startRoute(route config.Route) error {
 	)
 
 	return nil
+}
+
+func updateActiveRoutes(m *RouteManager, route config.Route, listener *routeListener) {
+	m.mu.Lock()
+	
+	activeRoutes := make([]*routeListener, 0, len(m.routes))
+	for _, existing := range m.routes {
+		existing.stateMu.RLock()
+		state := existing.state
+		existing.stateMu.RUnlock()
+		if state != stateStopped {
+			activeRoutes = append(activeRoutes, existing)
+		}
+	}
+	m.routes = activeRoutes
+
+	key := routeKey(route)
+	m.routeMap[key] = listener
+	m.routes = append(m.routes, listener)
+
+	m.mu.Unlock()
 }
 
 func (m *RouteManager) cleanupStoppedRoutes(keys []string) {
@@ -511,12 +515,10 @@ func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 			)
 			errors = append(errors, fmt.Errorf("%w: %s: %v", ErrRouteStopFailed, key, err))
 		} else {
-			// Only add to successful stops if stopRoute succeeded
 			successfulStops = append(successfulStops, key)
 		}
 	}
 
-	// Only cleanup routes that were successfully stopped
 	m.cleanupStoppedRoutes(successfulStops)
 
 	routesToStart := make([]config.Route, 0, len(changes.Added)+len(changes.Modified))
@@ -544,7 +546,7 @@ func (m *RouteManager) applyRouteChanges(changes RouteChanges) error {
 
 // watchConfigReloads monitors the ConfigManager for reload signals and
 // orchestrates graceful route transitions.
-func (m *RouteManager) watchConfigReloads() {
+func (m *RouteManager) watchConfigReloads(ctx context.Context) {
 	m.reloadWg.Add(1)
 	defer m.reloadWg.Done()
 
@@ -552,7 +554,7 @@ func (m *RouteManager) watchConfigReloads() {
 
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			m.logger.Debug("stopping config reload watcher")
 			return
 

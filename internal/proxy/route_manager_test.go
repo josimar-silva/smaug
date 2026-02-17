@@ -54,10 +54,7 @@ func ensureServersExist(cfg *config.Config) {
 
 	for _, route := range cfg.Routes {
 		if _, exists := cfg.Servers[route.Server]; !exists {
-			cfg.Servers[route.Server] = config.Server{
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			}
+			cfg.Servers[route.Server] = config.Server{}
 		}
 	}
 }

@@ -34,8 +34,6 @@ const validConfigYAML = `settings:
 
 servers:
   saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -100,8 +98,7 @@ func TestLoadValidConfigParsesServers(t *testing.T) {
 	require.Contains(t, config.Servers, "saruman", "Should have server 'saruman'")
 	saruman := config.Servers["saruman"]
 
-	assert.Equal(t, "AA:BB:CC:DD:EE:FF", saruman.MAC, "Server MAC should match")
-	assert.Equal(t, "192.168.1.255", saruman.Broadcast, "Server broadcast should match")
+	assert.NotNil(t, saruman, "Server should be available")
 }
 
 func TestLoadValidConfigParsesServerWakeOnLan(t *testing.T) {
@@ -234,9 +231,6 @@ func TestLoadValidationFailure(t *testing.T) {
       port: 0
 
 servers:
-  server1:
-    mac: "invalid-mac"
-    broadcast: "999.999.999.999"
 
 routes:
   - name: ""
@@ -292,8 +286,6 @@ func TestLoadWithEnvironmentVariableSubstitution(t *testing.T) {
 
 servers:
   saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -345,8 +337,6 @@ func TestLoadWithEnvironmentVariableDefaultValues(t *testing.T) {
 
 servers:
   saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -378,7 +368,7 @@ routes: []
 
 func TestLoadWithMixedEnvironmentVariables(t *testing.T) {
 	// Given: A config with some vars set and some missing (using defaults)
-	t.Setenv("SERVER_MAC", "11:22:33:44:55:66")
+	t.Setenv("HEALTH_ENDPOINT", "http://server.example.com:8000/status")
 
 	configMixed := `settings:
   gwaihir:
@@ -400,8 +390,6 @@ func TestLoadWithMixedEnvironmentVariables(t *testing.T) {
 
 servers:
   server1:
-    mac: "${SERVER_MAC}"
-    broadcast: "${BROADCAST:-192.168.1.255}"
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -409,8 +397,8 @@ servers:
     sleepOnLan:
       enabled: false
     healthCheck:
-      endpoint: "http://server.example.com:8000/status"
-      interval: 2s
+      endpoint: "${HEALTH_ENDPOINT}"
+      interval: "${HEALTH_INTERVAL:-2s}"
       timeout: 2s
 
 routes: []
@@ -428,9 +416,11 @@ routes: []
 	require.NoError(t, err, "Load should succeed with mixed env vars")
 	require.NotNil(t, config)
 	require.Contains(t, config.Servers, "server1")
+
 	server := config.Servers["server1"]
-	assert.Equal(t, "11:22:33:44:55:66", server.MAC)
-	assert.Equal(t, "192.168.1.255", server.Broadcast)
+	assert.Equal(t, "http://server.example.com:8000/status", server.HealthCheck.Endpoint)
+	assert.Equal(t, "2s", server.HealthCheck.Interval.String())
+
 	assert.Equal(t, "http://default.local", config.Settings.Gwaihir.URL)
 }
 
@@ -460,8 +450,6 @@ func TestLoadSubstitutionInMultipleNestedLevels(t *testing.T) {
 
 servers:
   server1:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: true
       timeout: 60s

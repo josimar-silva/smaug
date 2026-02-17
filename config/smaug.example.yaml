@@ -27,8 +27,6 @@ settings:
 # Servers definitions
 servers:
   saruman: # Unique server name
-    mac: "00:11:22:33:44:55"  # MAC address for WoL
-    broadcast: "192.168.68.255"  # Broadcast IP for WoL
     
     wakeOnLan: # WoL configuration
       enabled: true
@@ -43,6 +41,7 @@ servers:
     
     healthCheck:
       endpoint: "http://saruman.from-gondor.com:8000/status"
+      authToken: "${HEALTH_CHECK_TOKEN}"
       interval: 2s
       timeout: 2s
 

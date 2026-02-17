@@ -3,9 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -45,9 +43,6 @@ func (v *ValidationErrors) ErrorCount() int {
 }
 
 var (
-	macRegexColon  = regexp.MustCompile(`^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$`)
-	macRegexHyphen = regexp.MustCompile(`^([0-9A-Fa-f]{2}-){5}([0-9A-Fa-f]{2})$`)
-
 	validLogLevels = map[string]bool{
 		"debug": true,
 		"info":  true,
@@ -113,8 +108,6 @@ func (c *Config) validateObservability(errs *ValidationErrors) {
 
 func (c *Config) validateServers(errs *ValidationErrors) {
 	for name, server := range c.Servers {
-		errs.Add(validateMAC(server.MAC, fmt.Sprintf("servers.%s.mac", name)))
-		errs.Add(validateIP(server.Broadcast, fmt.Sprintf("servers.%s.broadcast", name)))
 		server.validateWakeOnLan(errs, name)
 		server.validateSleepOnLan(errs, name)
 		server.validateHealthCheck(errs, name)
@@ -176,27 +169,6 @@ func (c *Config) validateRoutes(errs *ValidationErrors) {
 			}
 		}
 	}
-}
-
-func validateMAC(mac, field string) error {
-	if mac == "" {
-		return fmt.Errorf("%s: MAC address cannot be empty", field)
-	}
-	if !macRegexColon.MatchString(mac) && !macRegexHyphen.MatchString(mac) {
-		return fmt.Errorf("%s: invalid MAC address format '%s'", field, mac)
-	}
-	return nil
-}
-
-func validateIP(ip, field string) error {
-	if ip == "" {
-		return fmt.Errorf("%s: IP address cannot be empty", field)
-	}
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("%s: invalid IP address '%s'", field, ip)
-	}
-	return nil
 }
 
 func validateURL(rawURL, field string) error {

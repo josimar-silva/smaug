@@ -308,14 +308,11 @@ Extract common test setup into reusable helpers:
 func NewValidMachine(id string) *domain.Machine {
     return &domain.Machine{
         ID:        id,
-        MAC:       "AA:BB:CC:DD:EE:FF",
-        Broadcast: "192.168.1.255",
     }
 }
 
 func NewMachineWithMAC(id, mac string) *domain.Machine {
     machine := NewValidMachine(id)
-    machine.MAC = mac
     return machine
 }
 
@@ -426,8 +423,6 @@ test(domain): add comprehensive Machine validation tests
 
 Use table-driven tests to cover all validation scenarios:
 - Valid machines
-- Invalid MAC formats
-- Empty broadcast addresses
 - Boundary conditions
 
 Achieves 100% coverage for Machine.Validate() method
@@ -614,8 +609,6 @@ routes:
 machines:
   - id: gandalf                 # Required: unique identifier
     name: "Gandalf Server"      # Required: human-readable name
-    mac: "AA:BB:CC:DD:EE:FF"    # Required: MAC address (XX:XX:XX:XX:XX:XX format)
-    broadcast: "192.168.1.255"  # Required: broadcast IP for network
 
 observability:
   health_check:
@@ -649,7 +642,7 @@ SMAUG_API_KEY=secret-key                # Overrides authentication.api_key
 
 - Only machines in `services.yaml` can receive WoL packets
 - No dynamic machine registration
-- Validate all inputs (MAC, broadcast IP)
+- Validate all inputs
 - Use domain validation methods
 
 ### Network Security

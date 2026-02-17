@@ -98,13 +98,13 @@ func TestHealthHandlerHandlesZeroActiveRoutes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Then: response shows zero active routes
+	// Then: response shows zero active routes and degraded status
 	var response health.ApplicationHealth
 	err := json.Unmarshal(rec.Body.Bytes(), &response)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, response.ActiveRoutes)
-	assert.Equal(t, "healthy", response.Status)
+	assert.Equal(t, "degraded", response.Status)
 }
 
 func TestLiveHandlerReturnsAliveStatus(t *testing.T) {

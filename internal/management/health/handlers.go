@@ -16,6 +16,8 @@ const (
 
 // NewHealthHandler creates an HTTP handler for the /health endpoint.
 // Returns overall application health status including version, active routes, and uptime.
+// This is a readiness-style check: status is "healthy" when routes are active,
+// "degraded" when no routes are active (service alive but not ready to serve traffic).
 func NewHealthHandler(provider RouteStatusProvider, versionInfo VersionInfo, log *logger.Logger, startTime time.Time) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -24,11 +26,18 @@ func NewHealthHandler(provider RouteStatusProvider, versionInfo VersionInfo, log
 		}
 
 		uptime := time.Since(startTime).Round(time.Second)
+		activeRoutes := provider.GetActiveRouteCount()
+
+		// Compute status based on active routes
+		status := "healthy"
+		if activeRoutes == 0 {
+			status = "degraded"
+		}
 
 		response := ApplicationHealth{
-			Status:       "healthy",
+			Status:       status,
 			Version:      versionInfo.Version,
-			ActiveRoutes: provider.GetActiveRouteCount(),
+			ActiveRoutes: activeRoutes,
 			Uptime:       uptime.String(),
 		}
 
@@ -105,12 +114,10 @@ func NewVersionHandler(versionInfo VersionInfo, log *logger.Logger) http.Handler
 			return
 		}
 
-		response := VersionResponse(versionInfo)
-
 		w.Header().Set(headerContentType, contentTypeJSON)
 		w.WriteHeader(http.StatusOK)
 
-		if err := json.NewEncoder(w).Encode(response); err != nil {
+		if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
 			log.Error("failed to encode version response", "error", err)
 		}
 	})

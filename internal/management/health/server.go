@@ -37,6 +37,9 @@ type Server struct {
 	mu              sync.RWMutex
 	running         bool
 	shutdownTimeout time.Duration
+	started         chan struct{}
+	startedOnce     sync.Once
+	startErr        error
 }
 
 // NewServer creates a new management server that will listen on the specified port.
@@ -47,18 +50,19 @@ func NewServer(port int, provider RouteStatusProvider, versionInfo VersionInfo, 
 		versionInfo:     versionInfo,
 		logger:          log,
 		shutdownTimeout: defaultShutdownTimeout,
+		started:         make(chan struct{}),
 	}
 }
 
 // Start starts the management HTTP server in a background goroutine.
-// Returns an error if the server is already running.
+// Returns an error if the server is already running or fails to bind immediately.
 func (s *Server) Start(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.running {
+		s.mu.Unlock()
 		return ErrServerAlreadyRunning
 	}
+	s.mu.Unlock()
 
 	s.startTime = time.Now()
 
@@ -74,16 +78,64 @@ func (s *Server) Start(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	s.running = true
-
 	go func() {
-		s.logger.Info("starting management server", "port", s.port)
-		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("management server error", "error", err)
+		time.Sleep(100 * time.Millisecond)
+		s.mu.RLock()
+		running := s.running
+		s.mu.RUnlock()
+
+		if running {
+			s.startedOnce.Do(func() { close(s.started) })
 		}
 	}()
 
-	return nil
+	// Run server in background goroutine
+	go func() {
+		s.logger.Info("starting management server", "port", s.port)
+
+		s.mu.Lock()
+		s.running = true
+		s.mu.Unlock()
+
+		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.mu.Lock()
+			s.running = false
+			s.startErr = err
+			s.mu.Unlock()
+
+			s.logger.Error("management server error", "error", err)
+			s.startedOnce.Do(func() { close(s.started) })
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		// Context cancelled, shutdown the server
+		s.mu.RLock()
+		if s.running {
+			s.mu.RUnlock()
+			s.logger.Info("context cancelled, shutting down management server", "port", s.port)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+			defer cancel()
+			if err := s.server.Shutdown(shutdownCtx); err != nil {
+				s.logger.Error("error during context-triggered shutdown", "error", err)
+			}
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+		} else {
+			s.mu.RUnlock()
+		}
+	}()
+
+	// Wait for startup to complete (success or failure)
+	<-s.started
+
+	s.mu.RLock()
+	startErr := s.startErr
+	s.mu.RUnlock()
+
+	return startErr
 }
 
 // Stop gracefully shuts down the management HTTP server.
@@ -102,7 +154,11 @@ func (s *Server) Stop() error {
 	defer cancel()
 
 	if err := s.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("%w: %v", ErrServerShutdownTimeout, err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %v", ErrServerShutdownTimeout, err)
+		}
+
+		return fmt.Errorf("server shutdown: %w", err)
 	}
 
 	s.running = false

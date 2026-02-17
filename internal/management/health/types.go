@@ -21,13 +21,6 @@ type ReadinessResponse struct {
 	ActiveRoutes int    `json:"activeRoutes"`
 }
 
-// VersionResponse represents the response for the version endpoint.
-type VersionResponse struct {
-	Version   string `json:"version"`
-	BuildTime string `json:"buildTime"`
-	GitCommit string `json:"gitCommit"`
-}
-
 // VersionInfo contains build version information.
 type VersionInfo struct {
 	Version   string `json:"version"`
@@ -35,9 +28,11 @@ type VersionInfo struct {
 	GitCommit string `json:"gitCommit"`
 }
 
+// VersionResponse is an alias to VersionInfo for the version endpoint.
+type VersionResponse = VersionInfo
+
 // RouteStatusProvider defines the interface for getting route status information.
-// This interface exists to decouple the health package from the proxy package,
-// enabling testability through mock implementations.
+// This interface exists to decouple the health package from the proxy package.
 type RouteStatusProvider interface {
 	// GetActiveRouteCount returns the number of currently active routes.
 	GetActiveRouteCount() int

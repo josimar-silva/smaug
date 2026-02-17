@@ -55,8 +55,6 @@ type MetricsConfig struct {
 
 // Server defines a physical or virtual machine that can be woken via Wake-on-LAN.
 type Server struct {
-	MAC         string            `yaml:"mac"`
-	Broadcast   string            `yaml:"broadcast"`
 	WakeOnLan   WakeOnLanConfig   `yaml:"wakeOnLan"`
 	SleepOnLan  SleepOnLanConfig  `yaml:"sleepOnLan"`
 	HealthCheck ServerHealthCheck `yaml:"healthCheck"`

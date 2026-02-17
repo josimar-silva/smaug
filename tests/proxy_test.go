@@ -50,10 +50,7 @@ func TestIntegrationProxyHotReloadAddRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
 		},
 	}
 
@@ -103,14 +100,8 @@ func TestIntegrationProxyHotReloadAddRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
-			"server2": {
-				MAC:       "11:22:33:44:55:66",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
+			"server2": {},
 		},
 	}
 
@@ -171,14 +162,8 @@ func TestIntegrationProxyHotReloadRemoveRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
-			"server2": {
-				MAC:       "11:22:33:44:55:66",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
+			"server2": {},
 		},
 	}
 
@@ -221,10 +206,7 @@ func TestIntegrationProxyHotReloadRemoveRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
 		},
 	}
 
@@ -273,10 +255,7 @@ func TestIntegrationProxyHotReloadModifyRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
 		},
 	}
 
@@ -322,10 +301,7 @@ func TestIntegrationProxyHotReloadModifyRoute(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
 		},
 	}
 
@@ -365,10 +341,7 @@ func TestIntegrationProxyHotReloadRapidChanges(t *testing.T) {
 			},
 		},
 		Servers: map[string]config.Server{
-			"server1": {
-				MAC:       "AA:BB:CC:DD:EE:FF",
-				Broadcast: "192.168.1.255",
-			},
+			"server1": {},
 		},
 	}
 
@@ -407,10 +380,7 @@ func TestIntegrationProxyHotReloadRapidChanges(t *testing.T) {
 				},
 			},
 			Servers: map[string]config.Server{
-				"server1": {
-					MAC:       "AA:BB:CC:DD:EE:FF",
-					Broadcast: "192.168.1.255",
-				},
+				"server1": {},
 			},
 		}
 

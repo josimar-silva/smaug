@@ -26,47 +26,6 @@ func testStringValidation(t *testing.T, fnName string, fn func(string, string) e
 	}
 }
 
-func TestValidateMAC(t *testing.T) {
-	testStringValidation(t, "validateMAC", validateMAC, []stringValidationTest{
-		{"valid MAC with colons", "00:11:22:33:44:55", "test.mac", false},
-		{"valid MAC with hyphens", "00-11-22-33-44-55", "test.mac", false},
-		{"valid MAC uppercase", "AA:BB:CC:DD:EE:FF", "test.mac", false},
-		{"valid MAC lowercase", "aa:bb:cc:dd:ee:ff", "test.mac", false},
-		{"valid MAC mixed case", "Aa:Bb:Cc:Dd:Ee:Ff", "test.mac", false},
-		{"valid MAC with zeros", "00:00:00:00:00:00", "test.mac", false},
-		{"valid MAC broadcast", "FF:FF:FF:FF:FF:FF", "test.mac", false},
-		{"empty MAC", "", "test.mac", true},
-		{"invalid MAC too short", "00:11:22:33:44", "test.mac", true},
-		{"invalid MAC too long", "00:11:22:33:44:55:66", "test.mac", true},
-		{"invalid MAC no separators", "001122334455", "test.mac", true},
-		{"invalid MAC wrong separator", "00.11.22.33.44.55", "test.mac", true},
-		{"invalid MAC mixed separators", "00:11-22:33-44:55", "test.mac", true},
-		{"invalid MAC non-hex chars", "GG:11:22:33:44:55", "test.mac", true},
-		{"invalid MAC spaces", "00 11 22 33 44 55", "test.mac", true},
-	})
-}
-
-func TestValidateIP(t *testing.T) {
-	testStringValidation(t, "validateIP", validateIP, []stringValidationTest{
-		{"valid IPv4", "192.168.1.1", "test.ip", false},
-		{"valid IPv4 localhost", "127.0.0.1", "test.ip", false},
-		{"valid IPv4 broadcast", "255.255.255.255", "test.ip", false},
-		{"valid IPv4 zero", "0.0.0.0", "test.ip", false},
-		{"valid IPv6 full", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", "test.ip", false},
-		{"valid IPv6 compressed", "2001:db8::1", "test.ip", false},
-		{"valid IPv6 localhost", "::1", "test.ip", false},
-		{"valid IPv6 all zeros", "::", "test.ip", false},
-		{"empty IP", "", "test.ip", true},
-		{"invalid IPv4 too many octets", "192.168.1.1.1", "test.ip", true},
-		{"invalid IPv4 too few octets", "192.168.1", "test.ip", true},
-		{"invalid IPv4 out of range", "256.1.1.1", "test.ip", true},
-		{"invalid IPv4 negative", "192.168.-1.1", "test.ip", true},
-		{"invalid IPv4 letters", "192.168.a.1", "test.ip", true},
-		{"invalid IPv6 malformed", "2001:db8::g1", "test.ip", true},
-		{"invalid just text", "not-an-ip", "test.ip", true},
-	})
-}
-
 func TestValidateURL(t *testing.T) {
 	testStringValidation(t, "validateURL", validateURL, []stringValidationTest{
 		{"valid HTTP URL", "http://example.com", "test.url", false},
@@ -170,10 +129,7 @@ func TestConfigValidateMultipleErrors(t *testing.T) {
 			},
 		},
 		Servers: map[string]Server{
-			"server1": {
-				MAC:       "invalid-mac",
-				Broadcast: "invalid-ip",
-			},
+			"server1": {},
 		},
 		Routes: []Route{
 			{
@@ -194,8 +150,8 @@ func TestConfigValidateMultipleErrors(t *testing.T) {
 		t.Fatalf("expected ValidationErrors, got %T", err)
 	}
 
-	if validationErr.ErrorCount() < 9 {
-		t.Errorf("expected at least 9 errors, got %d", validationErr.ErrorCount())
+	if validationErr.ErrorCount() < 7 {
+		t.Errorf("expected at least 7 errors, got %d", validationErr.ErrorCount())
 	}
 
 	errMsg := err.Error()
@@ -204,8 +160,6 @@ func TestConfigValidateMultipleErrors(t *testing.T) {
 		"settings.gwaihir.timeout",
 		"settings.observability.healthCheck.port",
 		"settings.observability.metrics.port",
-		"servers.server1.mac",
-		"servers.server1.broadcast",
 		"routes[0].name",
 		"routes[0].listen",
 		"routes[0].upstream",
@@ -242,8 +196,6 @@ func TestConfigValidateValidConfig(t *testing.T) {
 		},
 		Servers: map[string]Server{
 			"server1": {
-				MAC:       "00:11:22:33:44:55",
-				Broadcast: "192.168.1.255",
 				WakeOnLan: WakeOnLanConfig{
 					Enabled:  true,
 					Timeout:  1 * time.Minute,
@@ -358,10 +310,7 @@ func TestConfigValidateRouteServerReference(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
 				Servers: map[string]Server{
-					"server1": {
-						MAC:       "00:11:22:33:44:55",
-						Broadcast: "192.168.1.255",
-					},
+					"server1": {},
 				},
 				Routes: []Route{
 					{
@@ -422,8 +371,6 @@ func TestConfigValidateConditionalValidation(t *testing.T) {
 		config := &Config{
 			Servers: map[string]Server{
 				"server1": {
-					MAC:       "00:11:22:33:44:55",
-					Broadcast: "192.168.1.255",
 					WakeOnLan: WakeOnLanConfig{
 						Enabled: false,
 						Timeout: -1 * time.Second,
@@ -442,8 +389,6 @@ func TestConfigValidateConditionalValidation(t *testing.T) {
 		config := &Config{
 			Servers: map[string]Server{
 				"server1": {
-					MAC:       "00:11:22:33:44:55",
-					Broadcast: "192.168.1.255",
 					SleepOnLan: SleepOnLanConfig{
 						Enabled:  false,
 						Endpoint: "invalid-url",
@@ -462,8 +407,6 @@ func TestConfigValidateConditionalValidation(t *testing.T) {
 		config := &Config{
 			Servers: map[string]Server{
 				"server1": {
-					MAC:       "00:11:22:33:44:55",
-					Broadcast: "192.168.1.255",
 					HealthCheck: ServerHealthCheck{
 						Endpoint: "",
 						Interval: 0,

@@ -129,7 +129,7 @@ sequenceDiagram
     SMAUG->>HealthCheck: Check backend health
     
     alt Backend Unhealthy
-        HealthCheck->>Gwaihir: POST /wol<br/>(MAC: AA:BB:CC:DD:EE:FF)
+        HealthCheck->>Gwaihir: POST /wol<br/>(Machine ID: backend)
         Gwaihir->>Backend: UDP :9<br/>WoL Magic Packet
         HealthCheck->>Backend: Poll health<br/>(2s interval)
         Note over HealthCheck,Backend: Retry until healthy<br/>or timeout (60s)
@@ -206,8 +206,7 @@ settings:
 # Server definitions
 servers:
   saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
+
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -391,8 +390,6 @@ Example log entry:
   "timestamp": "2026-02-11T10:30:45Z",
   "msg": "wol_sent",
   "server": "saruman",
-  "mac": "AA:BB:CC:DD:EE:FF",
-  "broadcast": "192.168.1.255",
   "duration_ms": 120
 }
 ```
@@ -413,8 +410,8 @@ K8s probes configured in deployment manifest.
 - **Privilege Separation:** SMAUG runs unprivileged, Gwaihir handles WoL with elevated privileges
 - **Network Isolation:** NetworkPolicy restricts SMAUG → Gwaihir, Prometheus → metrics
 - **Authentication:** Gwaihir API key stored in K8s Secret (not ConfigMap)
-- **Input Validation:** Config schema validation, MAC address format check, URL parsing
-- **Rate Limiting:** 1 WoL request per 10s per MAC, prevents DoS attacks
+- **Input Validation:** Config schema validation, URL parsing
+- **Rate Limiting:** 1 WoL request per 10s per server, prevents DoS attacks
 - **SSRF Protection:** Sleep endpoint validation with allowlist
 
 ### Threat Mitigations
@@ -423,7 +420,7 @@ K8s probes configured in deployment manifest.
 |--------|-----------|
 | Gwaihir API abuse | API key auth + NetworkPolicy + rate limiting |
 | Config tampering | RBAC + validation + hash verification |
-| Wake flooding DoS | Rate limiting (1/10s per MAC) + debounce |
+| Wake flooding DoS | Rate limiting (1/10s per server) + debounce |
 | Sleep API SSRF | Endpoint allowlist + scheme validation |
 | Metrics info disclosure | NetworkPolicy (Prometheus only) |
 

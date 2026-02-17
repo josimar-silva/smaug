@@ -163,8 +163,7 @@ settings:
 # Server definitions
 servers:
   saruman:
-    mac: "AA:BB:CC:DD:EE:FF"
-    broadcast: "192.168.1.255"
+
     wakeOnLan:
       enabled: true
       timeout: 60s
@@ -179,8 +178,7 @@ servers:
         - "192.168.1.*"
 
   morgoth:
-    mac: "11:22:33:44:55:66"
-    broadcast: "192.168.1.255"
+
     wakeOnLan:
       enabled: true
       timeout: 90s
@@ -257,8 +255,8 @@ type GwaihirClient struct {
     client  *http.Client
 }
 
-func (g *GwaihirClient) Wake(ctx context.Context, mac, broadcast string) error {
-    req := WakeRequest{MAC: mac, Broadcast: broadcast}
+func (g *GwaihirClient) Wake(ctx context.Context, machineId string) error {
+    req := WakeRequest{machineId: machineId}
     httpReq, _ := http.NewRequestWithContext(ctx, "POST", g.baseURL+"/wol", marshal(req))
     httpReq.Header.Set("X-API-Key", g.apiKey)  // Shared secret auth
 
@@ -269,9 +267,9 @@ func (g *GwaihirClient) Wake(ctx context.Context, mac, broadcast string) error {
 
 **Security Controls:**
 1. **Authentication:** Shared API key in `X-API-Key` header (stored in K8s Secret)
-2. **Rate Limiting:** Gwaihir enforces 1 request/10s per MAC address
+2. **Rate Limiting:** Gwaihir enforces 1 request/10s per server
 3. **Network Policy:** K8s NetworkPolicy restricts Gwaihir ingress to SMAUG pods only
-4. **Audit Logging:** All WoL requests logged with source IP, MAC, timestamp
+4. **Audit Logging:** All WoL requests logged with source IP, server, timestamp
 
 **Rationale:**
 - Privilege separation: SMAUG cannot send raw network packets
@@ -483,15 +481,6 @@ func (it *IdleTracker) StartMonitor(cfg *Config) {
 func (c *Config) Validate() error {
     // Validate server configs
     for name, server := range c.Servers {
-        // MAC address format
-        if _, err := net.ParseMAC(server.MAC); err != nil {
-            return fmt.Errorf("server %s: invalid MAC: %w", name, err)
-        }
-
-        // Broadcast IP format
-        if ip := net.ParseIP(server.Broadcast); ip == nil {
-            return fmt.Errorf("server %s: invalid broadcast IP", name)
-        }
 
         // Timeout bounds (10s - 300s)
         if server.WakeTimeout < 10 || server.WakeTimeout > 300 {
@@ -732,7 +721,7 @@ spec:
 |--------|-----------|
 | **Gwaihir API abuse** | API key authentication + NetworkPolicy + rate limiting |
 | **Config tampering** | RBAC (read-only ConfigMap access) + validation + hash verification |
-| **Wake flooding DoS** | Rate limiting (1/10s per MAC) + debounce (5s) |
+| **Wake flooding DoS** | Rate limiting (1/10s per machine) + debounce (5s) |
 | **Sleep API SSRF** | Endpoint validation (allowlist + scheme check) |
 | **Metrics info disclosure** | NetworkPolicy (Prometheus only) + sanitized labels |
 | **Supply chain attack** | Image signing (cosign) + dependency scanning (govulncheck) |
@@ -753,18 +742,17 @@ spec:
 
 4. **Input Validation:**
    - Config schema validation (fail fast)
-   - MAC address format check
    - URL parsing and scheme validation
    - Sleep endpoint allowlist
 
 5. **Audit Logging:**
-   - All WoL requests logged (server, MAC, source IP, timestamp)
+   - All WoL requests logged (server, source IP, timestamp)
    - All sleep triggers logged (route, endpoint, idle duration)
    - Config reloads logged (success/failure)
    - Structured JSON logs for SIEM integration
 
 6. **Rate Limiting:**
-   - Gwaihir: 1 WoL request / 10s per MAC
+   - Gwaihir: 1 WoL request / 10s per server
    - SMAUG: 10 health checks / second per upstream
    - Idle tracker: Cooldown = idle timeout (avoid sleep loops)
 
@@ -789,8 +777,6 @@ spec:
   "timestamp": "2026-02-11T10:30:45Z",
   "msg": "wol_sent",
   "server": "saruman",
-  "mac": "AA:BB:CC:DD:EE:FF",
-  "broadcast": "192.168.1.255",
   "duration_ms": 120
 }
 ```

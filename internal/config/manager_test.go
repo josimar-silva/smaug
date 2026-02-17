@@ -47,8 +47,6 @@ func TestConfigManagerLoadAndGet(t *testing.T) {
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -87,8 +85,6 @@ func TestConfigManagerWatch(t *testing.T) {
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -119,8 +115,6 @@ routes: []
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -160,8 +154,6 @@ func TestConfigManagerInvalidConfig(t *testing.T) {
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -209,8 +201,6 @@ func TestConfigManagerDebounce(t *testing.T) {
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -242,8 +232,6 @@ routes: []
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:
@@ -287,8 +275,6 @@ func TestConfigManagerStopIdempotent(t *testing.T) {
       port: 9090
 servers:
   test:
-    mac: "00:11:22:33:44:55"
-    broadcast: "192.168.1.255"
     wakeOnLan:
       enabled: false
     sleepOnLan:

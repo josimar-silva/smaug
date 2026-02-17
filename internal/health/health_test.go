@@ -27,7 +27,7 @@ func TestHealthCheckerCheckHealthSuccess(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -60,7 +60,7 @@ func TestHealthCheckerCheckHealthSuccessRange(t *testing.T) {
 			}))
 			defer backend.Close()
 
-			checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+			checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 			ctx := context.Background()
 
 			// When: checking health
@@ -94,7 +94,7 @@ func TestHealthCheckerCheckHealthFailure(t *testing.T) {
 			}))
 			defer backend.Close()
 
-			checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+			checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 			ctx := context.Background()
 
 			// When: checking health
@@ -116,7 +116,7 @@ func TestHealthCheckerCheckHealthTimeout(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -146,7 +146,7 @@ func TestHealthCheckerCheckHealthFollowRedirects(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -166,7 +166,7 @@ func TestHealthCheckerCheckHealthTooManyRedirects(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -191,7 +191,7 @@ func TestHealthCheckerCheckHealthInvalidURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Given: an invalid URL
-			checker := NewHealthChecker(tt.url, 2*time.Second, newTestLogger())
+			checker := NewHealthChecker(tt.url, 2*time.Second, "", newTestLogger())
 			ctx := context.Background()
 
 			// When: checking health
@@ -212,7 +212,7 @@ func TestHealthCheckerCheckHealthContextCancellation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// When: cancelling context immediately
@@ -235,7 +235,7 @@ func TestHealthCheckerCheckHealthUsesGETMethod(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -249,7 +249,7 @@ func TestHealthCheckerCheckHealthUsesGETMethod(t *testing.T) {
 // TestHealthChecker_CheckHealth_UnreachableServer tests behavior when server is unreachable.
 func TestHealthCheckerCheckHealthUnreachableServer(t *testing.T) {
 	// Given: an unreachable server address
-	checker := NewHealthChecker("http://127.0.0.1:1", 2*time.Second, newTestLogger())
+	checker := NewHealthChecker("http://127.0.0.1:1", 2*time.Second, "", newTestLogger())
 	ctx := context.Background()
 
 	// When: checking health
@@ -258,4 +258,73 @@ func TestHealthCheckerCheckHealthUnreachableServer(t *testing.T) {
 	// Then: an error should be returned
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrHealthCheckNetworkError))
+}
+
+// TestHealthCheckerCheckHealthWithAuthToken verifies that the Authorization header
+// is sent when an auth token is configured and the backend accepts the request.
+func TestHealthCheckerCheckHealthWithAuthToken(t *testing.T) {
+	// Given: a backend that requires Authorization: Basic <token>
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Basic dXNlcjpwYXNzd29yZA==" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "dXNlcjpwYXNzd29yZA==", newTestLogger())
+
+	// When: checking health
+	err := checker.CheckHealth(context.Background())
+
+	// Then: no error (auth header was sent correctly)
+	assert.NoError(t, err)
+}
+
+// TestHealthCheckerCheckHealthWithoutAuthTokenReturns401 verifies that when no auth
+// token is configured and the backend requires auth, an error is returned.
+func TestHealthCheckerCheckHealthWithoutAuthTokenReturns401(t *testing.T) {
+	// Given: a backend that requires auth, but checker has no token
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
+
+	// When: checking health
+	err := checker.CheckHealth(context.Background())
+
+	// Then: error (401 is treated as unhealthy)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrHealthCheckFailed))
+}
+
+// TestHealthCheckerCheckHealthWithWrongTokenReturns401 verifies that a wrong auth
+// token causes the backend to return 401, which is treated as unhealthy.
+func TestHealthCheckerCheckHealthWithWrongTokenReturns401(t *testing.T) {
+	// Given: a backend that requires a specific token
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Basic dXNlcjpwYXNzd29yZA==" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	// Given: checker configured with wrong token
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "d3Jvbmd0b2tlbg==", newTestLogger())
+
+	// When: checking health
+	err := checker.CheckHealth(context.Background())
+
+	// Then: error (401 is treated as unhealthy)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrHealthCheckFailed))
 }

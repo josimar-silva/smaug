@@ -77,9 +77,10 @@ type SleepOnLanConfig struct {
 
 // ServerHealthCheck defines health check configuration for a server.
 type ServerHealthCheck struct {
-	Endpoint string        `yaml:"endpoint"`
-	Interval time.Duration `yaml:"interval"`
-	Timeout  time.Duration `yaml:"timeout"`
+	Endpoint  string        `yaml:"endpoint"`
+	Interval  time.Duration `yaml:"interval"`
+	Timeout   time.Duration `yaml:"timeout"`
+	AuthToken SecretString  `yaml:"authToken"` // Optional: base64-encoded user:password for Basic Auth
 }
 
 // Route defines a single proxy route configuration (port-per-service).

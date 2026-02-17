@@ -41,7 +41,7 @@ servers:
     
     healthCheck:
       endpoint: "http://saruman.from-gondor.com:8000/status"
-      authToken: "${HEALTH_CHECK_TOKEN}"
+      authToken: "${HEALTH_CHECK_TOKEN}"  # Optional: base64-encoded user:password for Basic Auth (echo -n "user:password" | base64)
       interval: 2s
       timeout: 2s
 

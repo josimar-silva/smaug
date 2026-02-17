@@ -35,11 +35,13 @@ const (
 // Parameters:
 //   - endpoint: The health check endpoint URL (e.g., "http://server:8000/health")
 //   - timeout: Maximum time to wait for a response (e.g., 2*time.Second)
+//   - authToken: Optional base64-encoded "user:password" token for HTTP Basic Auth.
+//     Pass an empty string to disable authentication.
 //   - log: Structured logger for health check events
 //
 // Returns:
 //   - A new HealthChecker instance bound to the specified endpoint
-func NewHealthChecker(endpoint string, timeout time.Duration, log *logger.Logger) *HealthChecker {
+func NewHealthChecker(endpoint string, timeout time.Duration, authToken string, log *logger.Logger) *HealthChecker {
 	client := &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -51,10 +53,11 @@ func NewHealthChecker(endpoint string, timeout time.Duration, log *logger.Logger
 	}
 
 	return &HealthChecker{
-		endpoint: endpoint,
-		timeout:  timeout,
-		client:   client,
-		logger:   log,
+		endpoint:  endpoint,
+		timeout:   timeout,
+		authToken: authToken,
+		client:    client,
+		logger:    log,
 	}
 }
 
@@ -98,6 +101,10 @@ func (h *HealthChecker) executeHealthRequest(ctx context.Context) (int, error) {
 			"error", err,
 		)
 		return 0, fmt.Errorf("%w: failed to create request for %s: %v", ErrHealthCheckNetworkError, h.endpoint, err)
+	}
+
+	if h.authToken != "" {
+		req.Header.Set("Authorization", "Basic "+h.authToken)
 	}
 
 	resp, err := h.client.Do(req)

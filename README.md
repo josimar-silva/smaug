@@ -326,8 +326,8 @@ internal/
 ├── health/           # Server health checker
 ├── config/           # Configuration parsing
 ├── middleware/       # HTTP middleware
-└── infrastructure/   # Logging, metrics, etc.
-└── management /      # Server Management
+├── infrastructure/   # Logging, metrics, etc.
+└── management/       # Server Management
 
 cmd/smaug/            # Application entry point
 tests/                # Integration tests

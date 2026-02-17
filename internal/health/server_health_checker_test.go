@@ -65,7 +65,7 @@ func TestNewServerHealthCheckerValidParameters(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 
 	// When: creating a ServerHealthChecker
@@ -86,7 +86,7 @@ func TestNewServerHealthCheckerPanicsOnInvalidParameters(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	log := newTestLogger()
 
@@ -155,7 +155,7 @@ func TestServerHealthCheckerCheckSuccess(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 
@@ -184,7 +184,7 @@ func TestServerHealthCheckerCheckFailure(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 
@@ -209,7 +209,7 @@ func TestServerHealthCheckerCheckFailure(t *testing.T) {
 // TestServerHealthChecker_Check_NetworkError tests network failure handling.
 func TestServerHealthCheckerCheckNetworkError(t *testing.T) {
 	// Given: an unreachable endpoint
-	checker := NewHealthChecker("http://192.0.2.1:9999/health", 100*time.Millisecond, newTestLogger())
+	checker := NewHealthChecker("http://192.0.2.1:9999/health", 100*time.Millisecond, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 
@@ -238,7 +238,7 @@ func TestServerHealthCheckerCheckContextCancellation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 
@@ -265,7 +265,7 @@ func TestServerHealthCheckerCheckUpdatesTimestamp(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 
@@ -296,7 +296,7 @@ func TestServerHealthCheckerCheckTransitionFromHealthyToUnhealthy(t *testing.T) 
 	}))
 	defer backend.Close()
 
-	checker := NewHealthChecker(backend.URL, 2*time.Second, newTestLogger())
+	checker := NewHealthChecker(backend.URL, 2*time.Second, "", newTestLogger())
 	store := newMockHealthStore()
 	serverChecker := NewServerHealthChecker("saruman", checker, store, newTestLogger())
 

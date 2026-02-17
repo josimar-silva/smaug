@@ -117,6 +117,7 @@ func newWorkerFor(server config.Server, m *HealthManager, serverID string) *serv
 	healthChecker := NewHealthChecker(
 		server.HealthCheck.Endpoint,
 		server.HealthCheck.Timeout,
+		server.HealthCheck.AuthToken.Value(),
 		m.logger,
 	)
 

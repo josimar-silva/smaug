@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -153,6 +154,13 @@ func (server *Server) validateHealthCheck(errs *ValidationErrors, name string) {
 	if server.HealthCheck.Timeout != 0 {
 		errs.Add(validateTimeout(server.HealthCheck.Timeout, fmt.Sprintf("servers.%s.healthCheck.timeout", name)))
 	}
+
+	if server.HealthCheck.AuthToken.Value() != "" {
+		errs.Add(validateBasicAuthToken(
+			server.HealthCheck.AuthToken.Value(),
+			fmt.Sprintf("servers.%s.healthCheck.authToken", name),
+		))
+	}
 }
 
 func (c *Config) validateRoutes(errs *ValidationErrors) {
@@ -199,6 +207,24 @@ func validateTimeout(timeout time.Duration, field string) error {
 	if timeout <= 0 {
 		return fmt.Errorf("%s: timeout must be greater than 0, got %s", field, timeout)
 	}
+	return nil
+}
+
+// validateBasicAuthToken checks that the given token is a valid base64-encoded
+// "user:password" string suitable for use as an HTTP Basic Auth credential.
+// The token must decode to a string containing exactly one colon separating
+// a non-empty username from a password.
+func validateBasicAuthToken(token, field string) error {
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return fmt.Errorf("%s: invalid base64 encoding: %w", field, err)
+	}
+
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return fmt.Errorf("%s: decoded value must be in 'user:password' format", field)
+	}
+
 	return nil
 }
 

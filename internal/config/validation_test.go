@@ -492,3 +492,79 @@ func TestValidationErrorsErrorCount(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateBasicAuthToken(t *testing.T) {
+	testStringValidation(t, "validateBasicAuthToken", validateBasicAuthToken, []stringValidationTest{
+		// Valid: base64(user:password)
+		{"valid user:password", "dXNlcjpwYXNzd29yZA==", "test.authToken", false},
+		// Valid: base64(admin:secret) — different credentials
+		{"valid admin:secret", "YWRtaW46c2VjcmV0", "test.authToken", false},
+		// Valid: base64(user:) — empty password is allowed
+		{"valid user with empty password", "dXNlcjo=", "test.authToken", false},
+		// Invalid: not valid base64 at all
+		{"invalid base64", "not-valid-base64!!!", "test.authToken", true},
+		// Invalid: valid base64 but decodes to string with no colon (no user:password separator)
+		{"valid base64 but no colon", "aGVsbG93b3JsZA==", "test.authToken", true}, // base64("helloworld")
+		// Invalid: valid base64 but decodes to :password (empty username)
+		{"valid base64 but empty username", "OnBhc3N3b3Jk", "test.authToken", true}, // base64(":password")
+	})
+}
+
+func TestConfigValidateHealthCheckAuthToken(t *testing.T) {
+	makeConfig := func(token string) *Config {
+		return &Config{
+			Servers: map[string]Server{
+				"server1": {
+					HealthCheck: ServerHealthCheck{
+						Endpoint:  "http://192.168.1.100:8080/health",
+						AuthToken: SecretString{value: token},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("valid base64 user:password passes validation", func(t *testing.T) {
+		cfg := makeConfig("dXNlcjpwYXNzd29yZA==") // base64("user:password")
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("expected no validation error for valid authToken, got: %v", err)
+		}
+	})
+
+	t.Run("invalid base64 string fails validation", func(t *testing.T) {
+		cfg := makeConfig("not-valid-base64!!!")
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected validation error for invalid base64, got nil")
+		}
+		if !strings.Contains(err.Error(), "servers.server1.healthCheck.authToken") {
+			t.Errorf("error should reference the authToken field path, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "invalid base64 encoding") {
+			t.Errorf("error should mention invalid base64, got: %v", err)
+		}
+	})
+
+	t.Run("valid base64 without colon fails validation", func(t *testing.T) {
+		cfg := makeConfig("aGVsbG93b3JsZA==") // base64("helloworld"), no colon
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected validation error for base64 without colon, got nil")
+		}
+		if !strings.Contains(err.Error(), "servers.server1.healthCheck.authToken") {
+			t.Errorf("error should reference the authToken field path, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "user:password") {
+			t.Errorf("error should mention expected format, got: %v", err)
+		}
+	})
+
+	t.Run("empty auth token skips validation", func(t *testing.T) {
+		cfg := makeConfig("")
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("expected no validation error for empty authToken, got: %v", err)
+		}
+	})
+}

@@ -30,6 +30,7 @@ servers:
     
     wakeOnLan: # WoL configuration
       enabled: true
+      machineId: "saruman"
       timeout: 60s
       debounce: 5s  # Min interval between WoL attempts
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -48,6 +49,12 @@ var (
 
 const (
 	defaultShutdownTimeout = 30 * time.Second
+
+	// defaultWakeTimeout is the fallback wake timeout when not specified in server config.
+	defaultWakeTimeout = 30 * time.Second
+
+	// defaultWakeDebounce is the fallback debounce interval when not specified in server config.
+	defaultWakeDebounce = 5 * time.Second
 )
 
 // RouteManager manages HTTP listeners for all configured routes.
@@ -56,6 +63,7 @@ type RouteManager struct {
 	logger      *logger.Logger
 	middleware  middleware.Middleware
 	healthStore health.HealthStore
+	wakeOptions *WakeOptions // optional; nil means WoL coordination is disabled
 
 	routes          []*routeListener
 	routeMap        map[string]*routeListener
@@ -79,6 +87,7 @@ type routeListener struct {
 	startErr    error
 	started     chan struct{} // Closed when listener reaches running or failed state
 	startedOnce sync.Once     // Ensures started channel is closed exactly once
+	closer      io.Closer     // Non-nil when a WakeCoordinator is attached; must be closed on shutdown
 }
 
 // listenerState represents the lifecycle state of a listener.
@@ -168,6 +177,20 @@ func validateDependencies(configMgr *config.ConfigManager, log *logger.Logger, m
 	return nil
 }
 
+// SetWakeOptions enables Wake-on-LAN coordination for routes whose server has WoL
+// configured.  Must be called before Start.
+func (m *RouteManager) SetWakeOptions(opts WakeOptions) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cancel != nil {
+		m.logger.Warn("SetWakeOptions called after Start; ignoring")
+		return
+	}
+
+	m.wakeOptions = &opts
+}
+
 // Start initializes and starts HTTP listeners for all configured routes.
 // It also spawns a background goroutine to watch for config reloads.
 func (m *RouteManager) Start(ctx context.Context) error {
@@ -250,6 +273,15 @@ func (m *RouteManager) shutdownRoutes(ctx context.Context, routes []*routeListen
 			_ = listener.server.Close()
 		}
 
+		if listener.closer != nil {
+			if err := listener.closer.Close(); err != nil {
+				m.logger.Warn("wake coordinator close error",
+					"route", listener.route.Name,
+					"error", err,
+				)
+			}
+		}
+
 		listener.stateMu.Lock()
 		listener.state = stateStopped
 		listener.stateMu.Unlock()
@@ -322,7 +354,8 @@ func (m *RouteManager) GetActiveRouteCount() int {
 
 func (m *RouteManager) createListener(route config.Route) *routeListener {
 	proxyHandler := NewProxyHandler(route.Upstream, m.logger)
-	wrappedHandler := m.middleware(proxyHandler)
+	handler, closer := m.wrapWithWakeCoordinator(route, proxyHandler)
+	wrappedHandler := m.middleware(handler)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", route.Listen),
@@ -340,7 +373,77 @@ func (m *RouteManager) createListener(route config.Route) *routeListener {
 		logger:  m.logger,
 		state:   stateInitial,
 		started: make(chan struct{}),
+		closer:  closer,
 	}
+}
+
+// wrapWithWakeCoordinator wraps the given handler in a WakeCoordinator when all
+// of the following are true:
+//  1. WakeOptions have been set on the manager.
+//  2. The route references a server that has WoL enabled in the current config.
+//
+// The coordinator polls the shared health store (fed by the background HealthManager)
+// rather than making its own HTTP health checks.
+// If any condition is not met the original handler is returned unchanged with a nil closer.
+// The returned io.Closer must be closed when the route is shut down to release resources.
+func (m *RouteManager) wrapWithWakeCoordinator(route config.Route, h http.Handler) (http.Handler, io.Closer) {
+	if m.wakeOptions == nil {
+		return h, nil
+	}
+
+	if route.Server == "" {
+		return h, nil
+	}
+
+	cfg := m.configMgr.GetConfig()
+	if cfg == nil {
+		return h, nil
+	}
+
+	serverCfg, ok := cfg.Servers[route.Server]
+	if !ok || !serverCfg.WakeOnLan.Enabled {
+		return h, nil
+	}
+
+	wakeTimeout := serverCfg.WakeOnLan.Timeout
+	if wakeTimeout <= 0 {
+		wakeTimeout = defaultWakeTimeout
+	}
+
+	debounce := serverCfg.WakeOnLan.Debounce
+	if debounce <= 0 {
+		debounce = defaultWakeDebounce
+	}
+
+	coordinator, err := NewWakeCoordinator(
+		WakeCoordinatorConfig{
+			ServerID:    route.Server,
+			MachineID:   serverCfg.WakeOnLan.MachineID,
+			WakeTimeout: wakeTimeout,
+			Debounce:    debounce,
+		},
+		h,
+		m.wakeOptions.Sender,
+		m.healthStore,
+		m.logger,
+	)
+	if err != nil {
+		m.logger.Error("failed to create wake coordinator; falling back to direct proxy",
+			"route", route.Name,
+			"server", route.Server,
+			"machine_id", serverCfg.WakeOnLan.MachineID,
+			"error", err,
+		)
+		return h, nil
+	}
+
+	m.logger.Info("wake coordination enabled for route",
+		"route", route.Name,
+		"server", route.Server,
+		"machine_id", serverCfg.WakeOnLan.MachineID,
+	)
+
+	return coordinator, coordinator
 }
 
 func (m *RouteManager) runListener(listener *routeListener) {
@@ -364,7 +467,7 @@ func (m *RouteManager) runListener(listener *routeListener) {
 		listener.stateMu.Lock()
 		state := listener.state
 		listener.stateMu.Unlock()
-		// If still in starting state after 100ms, assume listening succeeded
+
 		if state == stateStarting {
 			listener.stateMu.Lock()
 			listener.state = stateRunning
@@ -420,6 +523,15 @@ func (m *RouteManager) stopRoute(key string) error {
 	if err := listener.server.Shutdown(shutdownCtx); err != nil {
 		_ = listener.server.Close()
 		return fmt.Errorf("shutdown failed: %w", err)
+	}
+
+	if listener.closer != nil {
+		if err := listener.closer.Close(); err != nil {
+			m.logger.Warn("wake coordinator close error",
+				"route", listener.route.Name,
+				"error", err,
+			)
+		}
 	}
 
 	listener.stateMu.Lock()

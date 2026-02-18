@@ -34,9 +34,10 @@ func testServerWithErrorResponse(statusCode int, message string) *httptest.Serve
 func TestNewClientValidParameters(t *testing.T) {
 	// Given: valid parameters
 	config := ClientConfig{
-		BaseURL: "http://gwaihir.example.com",
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     "http://gwaihir.example.com",
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	log := newTestLogger()
 
@@ -56,9 +57,10 @@ func TestNewClientValidParameters(t *testing.T) {
 // TestNewClientInvalidParameters tests constructor validation.
 func TestNewClientInvalidParameters(t *testing.T) {
 	validConfig := ClientConfig{
-		BaseURL: "http://gwaihir.example.com",
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     "http://gwaihir.example.com",
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	log := newTestLogger()
 
@@ -71,9 +73,10 @@ func TestNewClientInvalidParameters(t *testing.T) {
 		{
 			name: "empty baseURL",
 			config: ClientConfig{
-				BaseURL: "",
-				APIKey:  "test-api-key",
-				Timeout: 5 * time.Second,
+				BaseURL:     "",
+				APIKey:      "test-api-key",
+				Timeout:     5 * time.Second,
+				RetryConfig: NewRetryConfig(),
 			},
 			logger:      log,
 			expectedErr: ErrEmptyBaseURL,
@@ -81,9 +84,10 @@ func TestNewClientInvalidParameters(t *testing.T) {
 		{
 			name: "empty apiKey",
 			config: ClientConfig{
-				BaseURL: "http://gwaihir.example.com",
-				APIKey:  "",
-				Timeout: 5 * time.Second,
+				BaseURL:     "http://gwaihir.example.com",
+				APIKey:      "",
+				Timeout:     5 * time.Second,
+				RetryConfig: NewRetryConfig(),
 			},
 			logger:      log,
 			expectedErr: ErrEmptyAPIKey,
@@ -91,9 +95,10 @@ func TestNewClientInvalidParameters(t *testing.T) {
 		{
 			name: "zero timeout",
 			config: ClientConfig{
-				BaseURL: "http://gwaihir.example.com",
-				APIKey:  "test-api-key",
-				Timeout: 0,
+				BaseURL:     "http://gwaihir.example.com",
+				APIKey:      "test-api-key",
+				Timeout:     0,
+				RetryConfig: NewRetryConfig(),
 			},
 			logger:      log,
 			expectedErr: ErrInvalidTimeout,
@@ -101,9 +106,10 @@ func TestNewClientInvalidParameters(t *testing.T) {
 		{
 			name: "negative timeout",
 			config: ClientConfig{
-				BaseURL: "http://gwaihir.example.com",
-				APIKey:  "test-api-key",
-				Timeout: -5 * time.Second,
+				BaseURL:     "http://gwaihir.example.com",
+				APIKey:      "test-api-key",
+				Timeout:     -5 * time.Second,
+				RetryConfig: NewRetryConfig(),
 			},
 			logger:      log,
 			expectedErr: ErrInvalidTimeout,
@@ -173,9 +179,10 @@ func TestClientSendWoLSuccess(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -195,9 +202,10 @@ func TestClientSendWoLServerError(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -219,9 +227,10 @@ func TestClientSendWoLAuthenticationError(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "invalid-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "invalid-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -240,9 +249,10 @@ func TestClientSendWoLAuthenticationError(t *testing.T) {
 func TestClientSendWoLNetworkError(t *testing.T) {
 	// Given: an unreachable Gwaihir server
 	config := ClientConfig{
-		BaseURL: "http://192.0.2.1:9999", // TEST-NET-1 (unreachable)
-		APIKey:  "test-api-key",
-		Timeout: 100 * time.Millisecond,
+		BaseURL:     "http://192.0.2.1:9999", // TEST-NET-1 (unreachable)
+		APIKey:      "test-api-key",
+		Timeout:     100 * time.Millisecond,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -261,9 +271,10 @@ func TestClientSendWoLNetworkError(t *testing.T) {
 func TestClientSendWoLInvalidURLInRequest(t *testing.T) {
 	// Given: a configuration with an invalid base URL
 	config := ClientConfig{
-		BaseURL: "ht tp://invalid url with spaces", // Invalid URL format
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     "ht tp://invalid url with spaces", // Invalid URL format
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 
 	// When: creating a Gwaihir client
@@ -286,9 +297,10 @@ func TestClientSendWoLTimeoutError(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 50 * time.Millisecond, // Shorter than server response time
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     50 * time.Millisecond, // Shorter than server response time
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -303,6 +315,10 @@ func TestClientSendWoLTimeoutError(t *testing.T) {
 }
 
 // TestClientSendWoLContextCancellation tests handling of context cancellation.
+// When the context is already cancelled before the first attempt, the HTTP call
+// returns a network-level error.  With MaxAttempts > 1 the retry backoff also
+// detects the cancelled context and short-circuits, so the error propagated to
+// the caller is a context error (not necessarily ErrNetworkError).
 func TestClientSendWoLContextCancellation(t *testing.T) {
 	// Given: a slow Gwaihir server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -312,9 +328,10 @@ func TestClientSendWoLContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -325,9 +342,8 @@ func TestClientSendWoLContextCancellation(t *testing.T) {
 
 	err = client.SendWoL(ctx, "saruman")
 
-	// Then: should fail
+	// Then: should fail with any error (context or network-level)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrNetworkError))
 }
 
 // TestClientSendWoLInvalidMachineID tests validation of machine ID.
@@ -339,9 +355,10 @@ func TestClientSendWoLInvalidMachineID(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -362,9 +379,10 @@ func TestClientSendWoLMachineNotFound(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -444,9 +462,10 @@ func TestClientSendWoLErrorResponseParsing(t *testing.T) {
 			defer server.Close()
 
 			config := ClientConfig{
-				BaseURL: server.URL,
-				APIKey:  "test-api-key",
-				Timeout: 5 * time.Second,
+				BaseURL:     server.URL,
+				APIKey:      "test-api-key",
+				Timeout:     5 * time.Second,
+				RetryConfig: NewRetryConfig(),
 			}
 			client, err := NewClient(config, newTestLogger())
 			assert.NoError(t, err)
@@ -474,9 +493,10 @@ func TestClientSendWoLSuccessWithMalformedJSON(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)
@@ -527,9 +547,10 @@ func TestClientSendWoLSuccessResponseVariations(t *testing.T) {
 			defer server.Close()
 
 			config := ClientConfig{
-				BaseURL: server.URL,
-				APIKey:  "test-api-key",
-				Timeout: 5 * time.Second,
+				BaseURL:     server.URL,
+				APIKey:      "test-api-key",
+				Timeout:     5 * time.Second,
+				RetryConfig: NewRetryConfig(),
 			}
 			client, err := NewClient(config, newTestLogger())
 			assert.NoError(t, err)
@@ -544,60 +565,62 @@ func TestClientSendWoLSuccessResponseVariations(t *testing.T) {
 	}
 }
 
-// TestClientSendWoLAuthErrorWithMalformedJSON tests 401 with malformed JSON response.
-func TestClientSendWoLAuthErrorWithMalformedJSON(t *testing.T) {
-	// Given: a mock Gwaihir server that returns 401 with malformed JSON
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{invalid json`))
-	}))
-	defer server.Close()
-
-	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "invalid-key",
-		Timeout: 5 * time.Second,
+// TestClientSendWoLErrorWithMalformedJSON tests error responses that carry malformed JSON bodies.
+func TestClientSendWoLErrorWithMalformedJSON(t *testing.T) {
+	testCases := []struct {
+		name        string
+		statusCode  int
+		apiKey      string
+		machineID   string
+		expectedErr error
+		errSubstr   string
+	}{
+		{
+			name:        "401 with malformed JSON",
+			statusCode:  http.StatusUnauthorized,
+			apiKey:      "invalid-key",
+			machineID:   "saruman",
+			expectedErr: ErrAuthenticationFailed,
+			errSubstr:   "401",
+		},
+		{
+			name:        "404 with malformed JSON",
+			statusCode:  http.StatusNotFound,
+			apiKey:      "test-api-key",
+			machineID:   "unknown-machine",
+			expectedErr: ErrMachineNotFound,
+			errSubstr:   "404",
+		},
 	}
-	client, err := NewClient(config, newTestLogger())
-	assert.NoError(t, err)
 
-	// When: sending a WoL command
-	ctx := context.Background()
-	err = client.SendWoL(ctx, "saruman")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given: a server that returns the given status with malformed JSON
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.statusCode)
+				_, _ = w.Write([]byte(`{invalid json`))
+			}))
+			defer server.Close()
 
-	// Then: should return authentication error
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAuthenticationFailed))
-	assert.Contains(t, err.Error(), "401")
-}
+			config := ClientConfig{
+				BaseURL:     server.URL,
+				APIKey:      tc.apiKey,
+				Timeout:     5 * time.Second,
+				RetryConfig: NewRetryConfig(),
+			}
+			client, err := NewClient(config, newTestLogger())
+			assert.NoError(t, err)
 
-// TestClientSendWoLNotFoundWithMalformedJSON tests 404 with malformed JSON response.
-func TestClientSendWoLNotFoundWithMalformedJSON(t *testing.T) {
-	// Given: a mock Gwaihir server that returns 404 with malformed JSON
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{invalid json`))
-	}))
-	defer server.Close()
+			// When: sending a WoL command
+			err = client.SendWoL(context.Background(), tc.machineID)
 
-	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+			// Then: the domain error is returned even without a parseable body
+			assert.Error(t, err)
+			assert.True(t, errors.Is(err, tc.expectedErr))
+			assert.Contains(t, err.Error(), tc.errSubstr)
+		})
 	}
-	client, err := NewClient(config, newTestLogger())
-	assert.NoError(t, err)
-
-	// When: sending a WoL command
-	ctx := context.Background()
-	err = client.SendWoL(ctx, "unknown-machine")
-
-	// Then: should return machine not found error
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrMachineNotFound))
-	assert.Contains(t, err.Error(), "404")
 }
 
 // TestClientSendWoLLargeResponseBody tests handling of large response bodies.
@@ -616,9 +639,10 @@ func TestClientSendWoLLargeResponseBody(t *testing.T) {
 	defer server.Close()
 
 	config := ClientConfig{
-		BaseURL: server.URL,
-		APIKey:  "test-api-key",
-		Timeout: 5 * time.Second,
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		Timeout:     5 * time.Second,
+		RetryConfig: NewRetryConfig(),
 	}
 	client, err := NewClient(config, newTestLogger())
 	assert.NoError(t, err)

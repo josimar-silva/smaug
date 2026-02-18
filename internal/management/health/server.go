@@ -115,7 +115,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.running {
 			s.mu.RUnlock()
 			s.logger.Info("context cancelled, shutting down management server", "port", s.port)
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
 			defer cancel()
 			if err := s.server.Shutdown(shutdownCtx); err != nil {
 				s.logger.Error("error during context-triggered shutdown", "error", err)

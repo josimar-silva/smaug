@@ -62,9 +62,10 @@ type Server struct {
 
 // WakeOnLanConfig defines Wake-on-LAN configuration for a server.
 type WakeOnLanConfig struct {
-	Enabled  bool          `yaml:"enabled"`
-	Timeout  time.Duration `yaml:"timeout"`
-	Debounce time.Duration `yaml:"debounce"` // Min interval between WoL attempts
+	Enabled   bool          `yaml:"enabled"`
+	MachineID string        `yaml:"machineId"` // Gwaihir machine ID (must match allowlist entry)
+	Timeout   time.Duration `yaml:"timeout"`
+	Debounce  time.Duration `yaml:"debounce"` // Min interval between WoL attempts
 }
 
 // SleepOnLanConfig defines Sleep-on-LAN configuration for a server.

@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/josimar-silva/smaug/internal/client/gwaihir"
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
@@ -15,6 +17,9 @@ import (
 	"github.com/josimar-silva/smaug/internal/proxy"
 	"github.com/josimar-silva/smaug/internal/store"
 )
+
+// defaultGwaihirTimeout is used when GwaihirConfig.Timeout is zero or not set.
+const defaultGwaihirTimeout = 5 * time.Second
 
 func initLogger(cfg *config.Config, oldLog *logger.Logger) *logger.Logger {
 	log := logger.New(
@@ -44,7 +49,7 @@ func initHealthManager(cfg *config.Config, healthStore *store.InMemoryHealthStor
 	return healthManager, nil
 }
 
-func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger) (*proxy.RouteManager, error) {
+func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger, wakeOpts *proxy.WakeOptions) (*proxy.RouteManager, error) {
 	routeManager, err := proxy.NewRouteManager(configMgr, log, middleware.Chain(
 		middleware.NewRecoveryMiddleware(log),
 		middleware.NewLoggingMiddleware(log),
@@ -52,10 +57,52 @@ func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemo
 	if err != nil {
 		return nil, fmt.Errorf("failed to create route manager: %w", err)
 	}
+
+	if wakeOpts != nil {
+		routeManager.SetWakeOptions(*wakeOpts)
+	}
+
 	if err := routeManager.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start route manager: %w", err)
 	}
 	return routeManager, nil
+}
+
+func initWakeOptions(cfg *config.Config, log *logger.Logger) (*proxy.WakeOptions, error) {
+	if cfg.Settings.Gwaihir.URL == "" {
+		log.Info("Gwaihir URL not configured; Wake-on-LAN coordination disabled")
+		return nil, nil
+	}
+
+	wolCount := 0
+	for _, serverCfg := range cfg.Servers {
+		if serverCfg.WakeOnLan.Enabled {
+			wolCount++
+		}
+	}
+	if wolCount == 0 {
+		log.Info("no servers with Wake-on-LAN enabled; wake coordination disabled")
+		return nil, nil
+	}
+
+	timeout := cfg.Settings.Gwaihir.Timeout
+	if timeout <= 0 {
+		timeout = defaultGwaihirTimeout
+	}
+
+	wolClient, err := gwaihir.NewClient(gwaihir.ClientConfig{
+		BaseURL:     cfg.Settings.Gwaihir.URL,
+		APIKey:      cfg.Settings.Gwaihir.APIKey.Value(),
+		Timeout:     timeout,
+		RetryConfig: gwaihir.NewRetryConfig(),
+	}, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Gwaihir client: %w", err)
+	}
+
+	log.Info("Wake-on-LAN coordination enabled", "server_count", wolCount)
+
+	return &proxy.WakeOptions{Sender: wolClient}, nil
 }
 
 func startManagementServer(cfg *config.Config, routeStatusProvider mgmhealth.RouteStatusProvider, log *logger.Logger) (*mgmhealth.Server, error) {
@@ -123,7 +170,12 @@ func run() error {
 		}
 	}()
 
-	routeManager, err := initRouteManager(configMgr, healthStore, log)
+	wakeOpts, err := initWakeOptions(cfg, log)
+	if err != nil {
+		return err
+	}
+
+	routeManager, err := initRouteManager(configMgr, healthStore, log, wakeOpts)
 	if err != nil {
 		return err
 	}

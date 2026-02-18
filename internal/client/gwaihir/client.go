@@ -13,7 +13,7 @@ import (
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
 
-// maxResponseBodySize is the maximum allowed size for response bodies (1 MB)
+// maxResponseBodySize is the maximum allowed size for response bodies (1 MB).
 const maxResponseBodySize = 1 * 1024 * 1024
 
 // maxLogBodySize is the maximum number of bytes from a response body included in log output.
@@ -66,17 +66,19 @@ const (
 // Client is a REST client for the Gwaihir Wake-on-LAN service.
 // It provides methods to send WoL commands via the Gwaihir HTTP API.
 type Client struct {
-	baseURL    string         // Base URL of the Gwaihir service
-	apiKey     string         // API key for authentication
-	timeout    time.Duration  // HTTP request timeout
-	httpClient *http.Client   // HTTP client for making requests
-	logger     *logger.Logger // Structured logger
+	baseURL     string         // Base URL of the Gwaihir service
+	apiKey      string         // API key for authentication
+	timeout     time.Duration  // HTTP request timeout
+	httpClient  *http.Client   // HTTP client for making requests
+	logger      *logger.Logger // Structured logger
+	retryConfig RetryConfig    // Retry configuration (defaults applied at construction)
 }
 
 // NewClient creates a new Gwaihir REST client with the given configuration.
 //
 // Parameters:
-//   - config: Client configuration including base URL, API key, and timeout
+//   - config: Client configuration including base URL, API key, timeout, and retry
+//     settings. RetryConfig must be set explicitly; use NewRetryConfig() for defaults.
 //   - logger: Structured logger for client operations
 //
 // Returns:
@@ -88,9 +90,12 @@ type Client struct {
 //   - ErrEmptyAPIKey if config.APIKey is empty
 //   - ErrInvalidTimeout if config.Timeout is zero or negative
 //   - ErrNilLogger if logger is nil
+//   - ErrInvalidRetryConfig if an explicit RetryConfig has MaxAttempts < 1 or BaseDelay <= 0
 func NewClient(config ClientConfig, logger *logger.Logger) (*Client, error) {
-	err := validate(config, logger)
-	if err != nil {
+	if err := config.RetryConfig.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validate(config, logger); err != nil {
 		return nil, err
 	}
 
@@ -101,11 +106,12 @@ func NewClient(config ClientConfig, logger *logger.Logger) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
-		logger: logger,
+		logger:      logger,
+		retryConfig: config.RetryConfig,
 	}, nil
 }
 
-func validate(config ClientConfig, logger *logger.Logger) error {
+func validate(config ClientConfig, log *logger.Logger) error {
 	if config.BaseURL == "" {
 		return ErrEmptyBaseURL
 	}
@@ -118,13 +124,16 @@ func validate(config ClientConfig, logger *logger.Logger) error {
 	if config.Timeout <= 0 {
 		return ErrInvalidTimeout
 	}
-	if logger == nil {
+	if log == nil {
 		return ErrNilLogger
 	}
 	return nil
 }
 
 // SendWoL sends a Wake-on-LAN command to the specified machine via the Gwaihir service.
+// When a transient error occurs (5xx response or network failure) the request is
+// retried up to c.retryConfig.MaxAttempts times using exponential backoff with jitter.
+// Permanent errors (4xx) are never retried.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
@@ -155,16 +164,83 @@ func (c *Client) SendWoL(ctx context.Context, machineID string) error {
 		logFieldMachineID, machineID,
 	)
 
-	req := WoLRequest{
-		MachineID: machineID,
+	return c.sendWithRetry(ctx, machineID)
+}
+
+func (c *Client) sendWithRetry(ctx context.Context, machineID string) error {
+	wolReq := WoLRequest{MachineID: machineID}
+
+	var (
+		lastErr    error
+		statusCode int
+		respBody   []byte
+	)
+
+	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {
+		if attempt > 1 {
+			backoff := c.retryConfig.Backoff(attempt - 1)
+			c.logger.WarnContext(ctx, "retrying WoL request after transient error",
+				logFieldMachineID, machineID,
+				"attempt", attempt,
+				"max_attempts", c.retryConfig.MaxAttempts,
+				"backoff_ms", backoff.Milliseconds(),
+				logFieldError, lastErr,
+			)
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return fmt.Errorf("retry backoff interrupted: %w", sleepErr)
+			}
+		}
+
+		var reqErr error
+		statusCode, respBody, reqErr = c.executeWoLRequest(ctx, wolReq)
+		if reqErr != nil {
+			lastErr = reqErr
+			c.logger.WarnContext(ctx, "WoL attempt failed with network error",
+				logFieldMachineID, machineID,
+				"attempt", attempt,
+				"max_attempts", c.retryConfig.MaxAttempts,
+				logFieldError, reqErr,
+			)
+			continue
+		}
+
+		if isSuccessStatus(statusCode) || isNonRetryableStatus(statusCode) {
+			return c.handleWoLResponse(ctx, statusCode, respBody, machineID)
+		}
+
+		lastErr = fmt.Errorf(errFmtStatus, ErrWoLRequestFailed, statusCode)
+		c.logger.WarnContext(ctx, "WoL attempt failed with server error",
+			logFieldMachineID, machineID,
+			"attempt", attempt,
+			"max_attempts", c.retryConfig.MaxAttempts,
+			logFieldStatusCode, statusCode,
+		)
 	}
 
-	statusCode, respBody, err := c.executeWoLRequest(ctx, req)
-	if err != nil {
-		return err
+	if lastErr != nil && statusCode == 0 {
+		return lastErr
 	}
 
 	return c.handleWoLResponse(ctx, statusCode, respBody, machineID)
+}
+
+func isSuccessStatus(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
+}
+
+func isNonRetryableStatus(statusCode int) bool {
+	return statusCode >= 400 && statusCode < 500
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Client) executeWoLRequest(ctx context.Context, req WoLRequest) (int, []byte, error) {

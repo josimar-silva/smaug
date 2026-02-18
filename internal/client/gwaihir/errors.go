@@ -35,4 +35,8 @@ var (
 
 	// ErrNilLogger is returned when the logger is nil during client construction.
 	ErrNilLogger = errors.New("logger cannot be nil")
+
+	// ErrInvalidRetryConfig is returned when an explicit RetryConfig has invalid values
+	// (MaxAttempts < 1 or BaseDelay <= 0).
+	ErrInvalidRetryConfig = errors.New("invalid retry config: MaxAttempts must be >= 1 and BaseDelay must be > 0")
 )

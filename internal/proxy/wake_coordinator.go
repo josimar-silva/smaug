@@ -10,6 +10,7 @@ import (
 
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 var (
@@ -94,6 +95,7 @@ type WakeCoordinator struct {
 	healthStore health.HealthStore
 	downstream  http.Handler
 	logger      *logger.Logger
+	metrics     *metrics.Registry
 
 	done      chan struct{}  // closed by Close() to unblock in-flight wake goroutines
 	closeOnce sync.Once      // ensures Close() is idempotent
@@ -112,6 +114,7 @@ type WakeCoordinator struct {
 //   - wolSender: Used to send Wake-on-LAN commands.
 //   - store: Health store polled to detect when the server becomes healthy.
 //   - log: Structured logger.
+//   - m: Metrics registry (optional, can be nil).
 //
 // Possible errors:
 //   - ErrMissingServerID, ErrMissingMachineID, ErrInvalidWakeTimeout
@@ -123,6 +126,7 @@ func NewWakeCoordinator(
 	wolSender WoLSender,
 	store health.HealthStore,
 	log *logger.Logger,
+	m *metrics.Registry,
 ) (*WakeCoordinator, error) {
 	if err := validateWakeCoordinatorConfig(cfg, downstream, wolSender, store, log); err != nil {
 		return nil, err
@@ -143,6 +147,7 @@ func NewWakeCoordinator(
 		healthStore:  store,
 		downstream:   downstream,
 		logger:       log,
+		metrics:      m,
 		done:         make(chan struct{}),
 	}, nil
 }
@@ -269,6 +274,15 @@ func (c *WakeCoordinator) performWake(wake *inflightWake) {
 	}
 
 	err := c.pollUntilHealthyWithContext(wakeCtx)
+
+	// Record wake attempt result
+	if c.metrics != nil {
+		success := err == nil
+		c.metrics.Power.RecordWakeAttempt(c.serverID, success)
+		if success {
+			c.metrics.Power.SetServerAwake(c.serverID, true)
+		}
+	}
 
 	wake.err = err
 	close(wake.done)

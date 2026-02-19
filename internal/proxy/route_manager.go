@@ -462,6 +462,7 @@ func (m *RouteManager) wrapWithWakeCoordinator(route config.Route, h http.Handle
 		m.wakeOptions.Sender,
 		m.healthStore,
 		m.logger,
+		nil, // metrics are optional
 	)
 	if err != nil {
 		m.logger.Error("failed to create wake coordinator; falling back to direct proxy",

@@ -112,7 +112,7 @@ func newCoordinator(
 	downstream http.Handler,
 ) *WakeCoordinator {
 	t.Helper()
-	c, err := NewWakeCoordinator(cfg, downstream, wol, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, downstream, wol, hs, newCoordinatorTestLogger(), nil)
 	require.NoError(t, err)
 	return c
 }
@@ -138,7 +138,7 @@ func TestNewWakeCoordinatorSuccess(t *testing.T) {
 	cfg := defaultConfig()
 
 	// When: creating the coordinator
-	c, err := NewWakeCoordinator(cfg, downstream, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, downstream, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then: no error
 	assert.NoError(t, err)
@@ -153,7 +153,7 @@ func TestNewWakeCoordinatorRejectsEmptyServerID(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -169,7 +169,7 @@ func TestNewWakeCoordinatorRejectsEmptyMachineID(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -185,7 +185,7 @@ func TestNewWakeCoordinatorRejectsZeroWakeTimeout(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -200,7 +200,7 @@ func TestNewWakeCoordinatorRejectsNilDownstream(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, nil, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, nil, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -215,7 +215,7 @@ func TestNewWakeCoordinatorRejectsNilWoLSender(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, nil, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, nil, hs, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -229,7 +229,7 @@ func TestNewWakeCoordinatorRejectsNilHealthStore(t *testing.T) {
 	cfg := defaultConfig()
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, nil, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, nil, newCoordinatorTestLogger(), nil)
 
 	// Then
 	assert.Error(t, err)
@@ -244,7 +244,7 @@ func TestNewWakeCoordinatorRejectsNilLogger(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, nil)
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, nil, nil)
 
 	// Then
 	assert.Error(t, err)
@@ -453,7 +453,7 @@ func TestNewWakeCoordinatorDefaultPollInterval(t *testing.T) {
 	hs := newFakeHealthStore(true)
 
 	// When
-	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger())
+	c, err := NewWakeCoordinator(cfg, &okHandler{}, &fakeWoLSender{}, hs, newCoordinatorTestLogger(), nil)
 
 	// Then: coordinator uses the package default
 	require.NoError(t, err)

@@ -189,7 +189,7 @@ func TestNewClientConfigDefaultTimeout(t *testing.T) {
 func TestClientSleepSuccess(t *testing.T) {
 	// Given: a server that returns 200 OK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method, "must use POST method")
+		assert.Equal(t, http.MethodGet, r.Method, "must use GET method")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -295,8 +295,8 @@ func TestClientSleepContextCancellation(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestClientSleepUsesPostMethod verifies that Sleep sends a POST request.
-func TestClientSleepUsesPostMethod(t *testing.T) {
+// TestClientSleepUsesGetMethod verifies that Sleep sends a GET request.
+func TestClientSleepUsesGetMethod(t *testing.T) {
 	// Given: a server that records the request method
 	var receivedMethod string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -310,6 +310,6 @@ func TestClientSleepUsesPostMethod(t *testing.T) {
 	// When: sending a sleep command
 	_ = client.Sleep(context.Background())
 
-	// Then: the request must use POST
-	assert.Equal(t, http.MethodPost, receivedMethod)
+	// Then: the request must use GET
+	assert.Equal(t, http.MethodGet, receivedMethod)
 }

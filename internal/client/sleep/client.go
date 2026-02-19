@@ -124,13 +124,13 @@ func isLoopbackOrLocalhost(host string) bool {
 	return ip.IsLoopback() || ip.IsUnspecified()
 }
 
-// Sleep sends a POST request to the configured sleep endpoint.
+// Sleep sends a GET request to the configured sleep endpoint.
 // It logs the trigger and returns an error if the request fails or the
 // endpoint returns a non-2xx status code.
 func (c *Client) Sleep(ctx context.Context) error {
 	c.logger.InfoContext(ctx, logMsgSendingSleep, logFieldEndpoint, c.endpoint)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf(errMsgCreateRequest, ErrNetworkError, c.endpoint, err)
 	}

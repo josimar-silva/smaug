@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 var (
@@ -63,8 +64,9 @@ type routeEntry struct {
 //   - Each Start/Stop cycle uses a dedicated done channel so that a concurrent
 //     Start cannot cause Stop to wait on the wrong goroutine.
 type IdleTracker struct {
-	cfg    IdleTrackerConfig
-	logger *logger.Logger
+	cfg     IdleTrackerConfig
+	logger  *logger.Logger
+	metrics *metrics.Registry // Metrics registry (optional)
 
 	mu     sync.RWMutex
 	routes map[string]*routeEntry
@@ -94,6 +96,20 @@ func NewIdleTracker(cfg IdleTrackerConfig, log *logger.Logger) (*IdleTracker, er
 		routes:  make(map[string]*routeEntry),
 		sleepCh: make(chan string, sleepTriggerBufSize),
 	}, nil
+}
+
+// SetMetrics sets the metrics registry for recording idle sleep triggers.
+// Must be called before Start.
+func (t *IdleTracker) SetMetrics(reg *metrics.Registry) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.running {
+		t.logger.Warn("SetMetrics called after Start; ignoring")
+		return
+	}
+
+	t.metrics = reg
 }
 
 // RegisterRoute registers a route with the tracker and associates it with the given
@@ -276,6 +292,10 @@ func (t *IdleTracker) checkIdleRoutes(ctx context.Context) {
 			// Reset lastSeen to now so the route must idle for another full
 			// idleTimeout before the next trigger is emitted.
 			entry.lastSeen = now
+			// Record sleep trigger metric
+			if t.metrics != nil {
+				t.metrics.Power.RecordSleepTriggered(routeID)
+			}
 		default:
 			t.logger.WarnContext(ctx, "sleep trigger channel full, dropping trigger",
 				"operation", "check_idle_routes",

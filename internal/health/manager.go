@@ -8,6 +8,7 @@ import (
 
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 // HealthManager coordinates health checking for all configured servers.
@@ -16,6 +17,7 @@ type HealthManager struct {
 	config  *config.Config
 	store   HealthStore
 	logger  *logger.Logger
+	metrics *metrics.Registry // Metrics registry (optional)
 	workers []*serverWorker
 
 	cancel context.CancelFunc
@@ -58,6 +60,20 @@ func NewHealthManager(cfg *config.Config, store HealthStore, log *logger.Logger)
 		logger:  log,
 		workers: make([]*serverWorker, 0),
 	}
+}
+
+// SetMetrics sets the metrics registry for recording health check failures.
+// Must be called before Start.
+func (m *HealthManager) SetMetrics(reg *metrics.Registry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cancel != nil {
+		m.logger.Warn("SetMetrics called after Start; ignoring")
+		return
+	}
+
+	m.metrics = reg
 }
 
 // Start initializes and starts health check workers for all configured servers.
@@ -126,6 +142,7 @@ func newWorkerFor(server config.Server, m *HealthManager, serverID string) *serv
 		healthChecker,
 		m.store,
 		m.logger,
+		m.metrics,
 	)
 
 	worker := &serverWorker{

@@ -2,17 +2,20 @@ package health
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 // ServerHealthChecker orchestrates health checks for a single server.
 type ServerHealthChecker struct {
-	serverID string         // Server identifier (matches config key)
-	checker  *HealthChecker // HTTP health checker bound to server's endpoint
-	store    HealthStore    // Store for persisting health status
-	logger   *logger.Logger // Structured logger
+	serverID string            // Server identifier (matches config key)
+	checker  *HealthChecker    // HTTP health checker bound to server's endpoint
+	store    HealthStore       // Store for persisting health status
+	logger   *logger.Logger    // Structured logger
+	metrics  *metrics.Registry // Metrics registry (optional)
 }
 
 // NewServerHealthChecker creates a new ServerHealthChecker for a specific server.
@@ -22,10 +25,11 @@ type ServerHealthChecker struct {
 //   - checker: HealthChecker already configured with the server's endpoint and timeout
 //   - store: HealthStore for persisting health check results
 //   - logger: Logger for structured logging
+//   - m: Metrics registry (optional, can be nil)
 //
 // Returns a new ServerHealthChecker instance.
-// Panics if any parameter is nil/empty.
-func NewServerHealthChecker(serverID string, checker *HealthChecker, store HealthStore, logger *logger.Logger) *ServerHealthChecker {
+// Panics if any required parameter is nil/empty.
+func NewServerHealthChecker(serverID string, checker *HealthChecker, store HealthStore, logger *logger.Logger, m *metrics.Registry) *ServerHealthChecker {
 	if serverID == "" {
 		panic("serverID cannot be empty")
 	}
@@ -44,6 +48,7 @@ func NewServerHealthChecker(serverID string, checker *HealthChecker, store Healt
 		checker:  checker,
 		store:    store,
 		logger:   logger,
+		metrics:  m,
 	}
 }
 
@@ -75,6 +80,7 @@ func (s *ServerHealthChecker) Check(ctx context.Context) (ServerHealthStatus, er
 			"server_id", s.serverID,
 			"error", err,
 		)
+		s.recordHealthCheckFailure(err)
 	} else {
 		s.logger.DebugContext(ctx, "health check succeeded",
 			"server_id", s.serverID,
@@ -84,4 +90,43 @@ func (s *ServerHealthChecker) Check(ctx context.Context) (ServerHealthStatus, er
 	s.store.Update(s.serverID, status)
 
 	return status, err
+}
+
+// recordHealthCheckFailure records a health check failure with the appropriate reason.
+// It maps error types to metric reason labels.
+func (s *ServerHealthChecker) recordHealthCheckFailure(err error) {
+	if s.metrics == nil {
+		return
+	}
+
+	reason := s.getFailureReason(err)
+	s.metrics.Power.RecordHealthCheckFailure(s.serverID, reason)
+}
+
+// getFailureReason maps error types to metric failure reasons.
+func (s *ServerHealthChecker) getFailureReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+
+	// Check for context-based errors first
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+
+	// Check for specific health check errors (wrapped or not)
+	if errors.Is(err, ErrHealthCheckNetworkError) {
+		return "network_error"
+	}
+	if errors.Is(err, ErrHealthCheckFailed) {
+		return "unhealthy_status"
+	}
+	if errors.Is(err, ErrHealthCheckURLMissing) {
+		return "missing_url"
+	}
+	if errors.Is(err, ErrHealthCheckTooManyRedirects) {
+		return "too_many_redirects"
+	}
+
+	return "unknown"
 }

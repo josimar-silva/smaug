@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/client/gwaihir"
+	sleepclient "github.com/josimar-silva/smaug/internal/client/sleep"
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
@@ -23,6 +24,32 @@ const defaultGwaihirTimeout = 5 * time.Second
 
 // defaultIdleCheckInterval is the period between idle checks in the IdleTracker.
 const defaultIdleCheckInterval = time.Minute
+
+// routeSleepSender implements proxy.SleepSender by dispatching sleep commands to
+// the correct upstream endpoint based on the route identifier.
+//
+// Each route maps to a server, and each server has its own SleepOnLan endpoint.
+// This adapter is built once at startup from config and passed to SleepCoordinator.
+type routeSleepSender struct {
+	// senders maps route name to the sleep client for that route's server.
+	senders map[string]*sleepclient.Client
+	log     *logger.Logger
+}
+
+// Sleep sends a sleep command to the upstream endpoint associated with routeID.
+// If no sender is registered for the route, the command is a no-op (logged at warn level).
+func (r *routeSleepSender) Sleep(ctx context.Context, routeID string) error {
+	client, ok := r.senders[routeID]
+	if !ok {
+		r.log.WarnContext(ctx, "no sleep client registered for route; skipping",
+			"operation", "route_sleep_sender",
+			"route_id", routeID,
+		)
+		return nil
+	}
+
+	return client.Sleep(ctx)
+}
 
 func initLogger(cfg *config.Config, oldLog *logger.Logger) *logger.Logger {
 	log := logger.New(
@@ -62,7 +89,9 @@ func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker
 	}
 
 	if solCount == 0 {
-		log.Info("no routes with Sleep-on-LAN enabled; idle tracking disabled")
+		log.Info("no routes with Sleep-on-LAN enabled; idle tracking disabled",
+			"operation", "init_idle_tracker",
+		)
 		return nil, nil
 	}
 
@@ -83,9 +112,77 @@ func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker
 		idleTracker.RegisterRoute(route.Name, server.SleepOnLan.IdleTimeout)
 	}
 
-	log.Info("Sleep-on-LAN idle tracking enabled", "route_count", solCount)
+	log.Info("Sleep-on-LAN idle tracking enabled",
+		"operation", "init_idle_tracker",
+		"route_count", solCount,
+	)
 
 	return idleTracker, nil
+}
+
+// initSleepCoordinator creates a SleepCoordinator that listens on idleTracker's
+// sleep triggers channel and sends sleep commands to each server's configured endpoint.
+//
+// Returns nil (no error) when there are no SleepOnLan-enabled routes or when
+// idleTracker is nil — the caller is responsible for not starting a nil coordinator.
+func initSleepCoordinator(cfg *config.Config, idleTracker *proxy.IdleTracker, log *logger.Logger) (*proxy.SleepCoordinator, error) {
+	if idleTracker == nil {
+		return nil, nil
+	}
+
+	senders := make(map[string]*sleepclient.Client)
+
+	for _, route := range cfg.Routes {
+		server, ok := cfg.Servers[route.Server]
+		if !ok || !server.SleepOnLan.Enabled {
+			continue
+		}
+
+		if server.SleepOnLan.Endpoint == "" {
+			log.Warn("Sleep-on-LAN endpoint not configured for route; skipping",
+				"operation", "init_sleep_coordinator",
+				"route", route.Name,
+				"server", route.Server,
+			)
+			continue
+		}
+
+		clientCfg := sleepclient.NewClientConfig(server.SleepOnLan.Endpoint)
+		client, err := sleepclient.NewClient(clientCfg, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create sleep client for route %q (server %q): %w",
+				route.Name, route.Server, err)
+		}
+
+		senders[route.Name] = client
+
+		log.Info("sleep client configured for route",
+			"operation", "init_sleep_coordinator",
+			"route", route.Name,
+			"server", route.Server,
+		)
+	}
+
+	if len(senders) == 0 {
+		log.Info("no sleep clients configured; sleep coordination disabled",
+			"operation", "init_sleep_coordinator",
+		)
+		return nil, nil
+	}
+
+	sender := &routeSleepSender{senders: senders, log: log}
+
+	coordinator, err := proxy.NewSleepCoordinator(idleTracker.SleepTriggers(), sender, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sleep coordinator: %w", err)
+	}
+
+	log.Info("sleep coordination enabled",
+		"operation", "init_sleep_coordinator",
+		"route_count", len(senders),
+	)
+
+	return coordinator, nil
 }
 
 func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger, wakeOpts *proxy.WakeOptions, idleTracker proxy.ActivityRecorder) (*proxy.RouteManager, error) {
@@ -243,6 +340,22 @@ func run() error {
 			log.Error("failed to stop route manager", "error", err)
 		}
 	}()
+
+	sleepCoordinator, err := initSleepCoordinator(cfg, idleTracker, log)
+	if err != nil {
+		return err
+	}
+
+	if sleepCoordinator != nil {
+		if err := sleepCoordinator.Start(context.Background()); err != nil {
+			return fmt.Errorf("failed to start sleep coordinator: %w", err)
+		}
+		defer func() {
+			if err := sleepCoordinator.Stop(); err != nil {
+				log.Error("failed to stop sleep coordinator", "error", err)
+			}
+		}()
+	}
 
 	if cfg.Settings.Observability.HealthCheck.Enabled {
 		managementServer, err := startManagementServer(cfg, routeManager, log)

@@ -12,6 +12,7 @@ import (
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 	"github.com/josimar-silva/smaug/internal/middleware"
 )
 
@@ -63,8 +64,9 @@ type RouteManager struct {
 	logger      *logger.Logger
 	middleware  middleware.Middleware
 	healthStore health.HealthStore
-	wakeOptions *WakeOptions     // optional; nil means WoL coordination is disabled
-	idleTracker ActivityRecorder // optional; nil means idle tracking is disabled
+	metrics     *metrics.Registry // optional; nil means metrics are disabled
+	wakeOptions *WakeOptions      // optional; nil means WoL coordination is disabled
+	idleTracker ActivityRecorder  // optional; nil means idle tracking is disabled
 
 	routes          []*routeListener
 	routeMap        map[string]*routeListener
@@ -205,6 +207,20 @@ func (m *RouteManager) SetIdleTracker(tracker ActivityRecorder) {
 	}
 
 	m.idleTracker = tracker
+}
+
+// SetMetrics sets the metrics registry for recording request metrics.
+// Must be called before Start.
+func (m *RouteManager) SetMetrics(reg *metrics.Registry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cancel != nil {
+		m.logger.Warn("SetMetrics called after Start; ignoring")
+		return
+	}
+
+	m.metrics = reg
 }
 
 // Start initializes and starts HTTP listeners for all configured routes.

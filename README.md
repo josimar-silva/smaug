@@ -37,6 +37,18 @@
   <a href="https://sonarcloud.io/summary/new_code?id=josimar-silva_smaug">
     <img src="https://sonarcloud.io/api/project_badges/measure?project=josimar-silva_smaug&metric=coverage" alt="coverage" />
   </a>
+  <!-- Gwaihir Health -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/health/badge.svg" alt="Smaug Health" />
+  </a>
+  <!-- Gwaihir Uptime -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/uptimes/30d/badge.svg" alt="Smaug Uptime" />
+  </a>
+  <!-- Gwaihir Response Time -->
+  <a href="https://hello.from-gondor.com/">
+    <img src="https://status.from-gondor.com/api/v1/endpoints/internal_smaug/response-times/30d/badge.svg" alt="Smaug Response Time" />
+  </a>
   <!-- CI -->
   <a href="https://github.com/josimar-silva/smaug/actions/workflows/ci.yaml">
     <img src="https://github.com/josimar-silva/smaug/actions/workflows/ci.yaml/badge.svg" alt="continuous integration" />
@@ -44,6 +56,10 @@
   <!-- CD -->
   <a href="https://github.com/josimar-silva/smaug/actions/workflows/cd.yaml">
     <img src="https://github.com/josimar-silva/smaug/actions/workflows/cd.yaml/badge.svg" alt="continuous delivery" />
+  </a>
+  <!-- Docker -->
+  <a href="https://github.com/josimar-silva/smaug/actions/workflows/docker.yaml">
+    <img src="https://github.com/josimar-silva/smaug/actions/workflows/docker.yaml/badge.svg" alt="docker" />
   </a>
 </div>
 

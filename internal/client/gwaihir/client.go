@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 // maxResponseBodySize is the maximum allowed size for response bodies (1 MB).
@@ -66,12 +67,13 @@ const (
 // Client is a REST client for the Gwaihir Wake-on-LAN service.
 // It provides methods to send WoL commands via the Gwaihir HTTP API.
 type Client struct {
-	baseURL     string         // Base URL of the Gwaihir service
-	apiKey      string         // API key for authentication
-	timeout     time.Duration  // HTTP request timeout
-	httpClient  *http.Client   // HTTP client for making requests
-	logger      *logger.Logger // Structured logger
-	retryConfig RetryConfig    // Retry configuration (defaults applied at construction)
+	baseURL     string            // Base URL of the Gwaihir service
+	apiKey      string            // API key for authentication
+	timeout     time.Duration     // HTTP request timeout
+	httpClient  *http.Client      // HTTP client for making requests
+	logger      *logger.Logger    // Structured logger
+	metrics     *metrics.Registry // Metrics registry (optional)
+	retryConfig RetryConfig       // Retry configuration (defaults applied at construction)
 }
 
 // NewClient creates a new Gwaihir REST client with the given configuration.
@@ -130,6 +132,12 @@ func validate(config ClientConfig, log *logger.Logger) error {
 	return nil
 }
 
+// SetMetrics sets the metrics registry for recording API call metrics.
+// Should be called before the client is actively used.
+func (c *Client) SetMetrics(reg *metrics.Registry) {
+	c.metrics = reg
+}
+
 // SendWoL sends a Wake-on-LAN command to the specified machine via the Gwaihir service.
 // When a transient error occurs (5xx response or network failure) the request is
 // retried up to c.retryConfig.MaxAttempts times using exponential backoff with jitter.
@@ -164,7 +172,17 @@ func (c *Client) SendWoL(ctx context.Context, machineID string) error {
 		logFieldMachineID, machineID,
 	)
 
-	return c.sendWithRetry(ctx, machineID)
+	startTime := time.Now()
+	err := c.sendWithRetry(ctx, machineID)
+	duration := time.Since(startTime).Seconds()
+
+	// Record API call metric
+	if c.metrics != nil {
+		success := err == nil
+		c.metrics.Gwaihir.RecordAPICall("send_wol", success, duration)
+	}
+
+	return err
 }
 
 func (c *Client) sendWithRetry(ctx context.Context, machineID string) error {

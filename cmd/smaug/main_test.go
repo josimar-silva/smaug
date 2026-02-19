@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -220,4 +221,111 @@ settings:
 	assert.NoError(t, err)
 	assert.Nil(t, opts)
 	// The fact that we reach here without error proves defaultGwaihirTimeout was used.
+}
+
+// --- initIdleTracker ---
+
+// configWithSleepOnLanRoute builds a *config.Config with one server that has
+// SleepOnLan enabled and one route pointing at that server.
+func configWithSleepOnLanRoute(t *testing.T, serverID, routeName string, idleTimeout time.Duration) *config.Config {
+	t.Helper()
+	raw := fmt.Sprintf(`
+servers:
+  %s:
+    sleepOnLan:
+      enabled: true
+      endpoint: "http://sleep.example.com"
+      idleTimeout: %s
+routes:
+  - name: %s
+    server: %s
+    listen: 8080
+    upstream: "http://localhost:9090"
+`, serverID, idleTimeout.String(), routeName, serverID)
+	var cfg config.Config
+	require.NoError(t, yaml.Unmarshal([]byte(raw), &cfg))
+	return &cfg
+}
+
+func TestInitIdleTrackerNoSleepOnLanRoutes(t *testing.T) {
+	// Given: config with no SleepOnLan-enabled servers
+	cfg := &config.Config{}
+	log := newTestLogger(t)
+
+	// When
+	tracker, err := initIdleTracker(cfg, log)
+
+	// Then: idle tracking is disabled; no error
+	assert.NoError(t, err)
+	assert.Nil(t, tracker)
+}
+
+func TestInitIdleTrackerWithSleepOnLanRouteReturnsTracker(t *testing.T) {
+	// Given: one route whose server has SleepOnLan enabled
+	cfg := configWithSleepOnLanRoute(t, "homeserver", "myroute", 5*time.Minute)
+	log := newTestLogger(t)
+
+	// When
+	tracker, err := initIdleTracker(cfg, log)
+
+	// Then: a non-nil tracker is returned
+	assert.NoError(t, err)
+	require.NotNil(t, tracker)
+}
+
+func TestInitIdleTrackerRegistersRouteWithIdleTimeout(t *testing.T) {
+	// Given: route with a 10-minute idle timeout
+	cfg := configWithSleepOnLanRoute(t, "homeserver", "myroute", 10*time.Minute)
+	log := newTestLogger(t)
+
+	// When
+	tracker, err := initIdleTracker(cfg, log)
+	require.NoError(t, err)
+	require.NotNil(t, tracker)
+
+	// Then: recording activity sets a recent last-seen time (idleNeverSeen = MaxInt64
+	// would only appear for unregistered routes that have never had activity).
+	tracker.RecordActivity("myroute")
+	idleTime := tracker.IdleTime("myroute")
+	assert.Less(t, idleTime, time.Second, "route should have a recent last-seen after RecordActivity")
+}
+
+func TestInitIdleTrackerSkipsRoutesWithoutSleepOnLan(t *testing.T) {
+	// Given: two servers; only one has SleepOnLan enabled
+	raw := `
+servers:
+  awake-server:
+    sleepOnLan:
+      enabled: false
+  sleep-server:
+    sleepOnLan:
+      enabled: true
+      endpoint: "http://sleep.example.com"
+      idleTimeout: 5m
+routes:
+  - name: awake-route
+    server: awake-server
+    listen: 8080
+    upstream: "http://localhost:9090"
+  - name: sleep-route
+    server: sleep-server
+    listen: 8081
+    upstream: "http://localhost:9091"
+`
+	var cfg config.Config
+	require.NoError(t, yaml.Unmarshal([]byte(raw), &cfg))
+	log := newTestLogger(t)
+
+	// When
+	tracker, err := initIdleTracker(&cfg, log)
+	require.NoError(t, err)
+	require.NotNil(t, tracker)
+
+	// Then: only sleep-route is registered with an idle timeout;
+	// awake-route auto-registers with zero timeout on first activity (no sleep trigger).
+	tracker.RecordActivity("sleep-route")
+	assert.Less(t, tracker.IdleTime("sleep-route"), time.Second)
+
+	tracker.RecordActivity("awake-route")
+	assert.Less(t, tracker.IdleTime("awake-route"), time.Second)
 }

@@ -21,6 +21,9 @@ import (
 // defaultGwaihirTimeout is used when GwaihirConfig.Timeout is zero or not set.
 const defaultGwaihirTimeout = 5 * time.Second
 
+// defaultIdleCheckInterval is the period between idle checks in the IdleTracker.
+const defaultIdleCheckInterval = time.Minute
+
 func initLogger(cfg *config.Config, oldLog *logger.Logger) *logger.Logger {
 	log := logger.New(
 		logger.LevelFrom(cfg.Settings.Logging.Level),
@@ -49,7 +52,43 @@ func initHealthManager(cfg *config.Config, healthStore *store.InMemoryHealthStor
 	return healthManager, nil
 }
 
-func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger, wakeOpts *proxy.WakeOptions) (*proxy.RouteManager, error) {
+func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker, error) {
+	// Count routes whose associated server has SleepOnLan enabled.
+	solCount := 0
+	for _, route := range cfg.Routes {
+		if server, ok := cfg.Servers[route.Server]; ok && server.SleepOnLan.Enabled {
+			solCount++
+		}
+	}
+
+	if solCount == 0 {
+		log.Info("no routes with Sleep-on-LAN enabled; idle tracking disabled")
+		return nil, nil
+	}
+
+	idleTracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{
+		CheckInterval: defaultIdleCheckInterval,
+	}, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create idle tracker: %w", err)
+	}
+
+	// Register each SleepOnLan-enabled route with its server's idle timeout so the
+	// background checker knows how long to wait before emitting a sleep trigger.
+	for _, route := range cfg.Routes {
+		server, ok := cfg.Servers[route.Server]
+		if !ok || !server.SleepOnLan.Enabled {
+			continue
+		}
+		idleTracker.RegisterRoute(route.Name, server.SleepOnLan.IdleTimeout)
+	}
+
+	log.Info("Sleep-on-LAN idle tracking enabled", "route_count", solCount)
+
+	return idleTracker, nil
+}
+
+func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger, wakeOpts *proxy.WakeOptions, idleTracker proxy.ActivityRecorder) (*proxy.RouteManager, error) {
 	routeManager, err := proxy.NewRouteManager(configMgr, log, middleware.Chain(
 		middleware.NewRecoveryMiddleware(log),
 		middleware.NewLoggingMiddleware(log),
@@ -60,6 +99,10 @@ func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemo
 
 	if wakeOpts != nil {
 		routeManager.SetWakeOptions(*wakeOpts)
+	}
+
+	if idleTracker != nil {
+		routeManager.SetIdleTracker(idleTracker)
 	}
 
 	if err := routeManager.Start(context.Background()); err != nil {
@@ -175,7 +218,23 @@ func run() error {
 		return err
 	}
 
-	routeManager, err := initRouteManager(configMgr, healthStore, log, wakeOpts)
+	idleTracker, err := initIdleTracker(cfg, log)
+	if err != nil {
+		return err
+	}
+
+	if idleTracker != nil {
+		if err := idleTracker.Start(context.Background()); err != nil {
+			return fmt.Errorf("failed to start idle tracker: %w", err)
+		}
+		defer func() {
+			if err := idleTracker.Stop(); err != nil {
+				log.Error("failed to stop idle tracker", "error", err)
+			}
+		}()
+	}
+
+	routeManager, err := initRouteManager(configMgr, healthStore, log, wakeOpts, idleTracker)
 	if err != nil {
 		return err
 	}

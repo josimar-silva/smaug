@@ -63,7 +63,8 @@ type RouteManager struct {
 	logger      *logger.Logger
 	middleware  middleware.Middleware
 	healthStore health.HealthStore
-	wakeOptions *WakeOptions // optional; nil means WoL coordination is disabled
+	wakeOptions *WakeOptions     // optional; nil means WoL coordination is disabled
+	idleTracker ActivityRecorder // optional; nil means idle tracking is disabled
 
 	routes          []*routeListener
 	routeMap        map[string]*routeListener
@@ -189,6 +190,21 @@ func (m *RouteManager) SetWakeOptions(opts WakeOptions) {
 	}
 
 	m.wakeOptions = &opts
+}
+
+// SetIdleTracker attaches an ActivityRecorder that is notified of every incoming
+// request.  The tracker is used to drive the idle-detection and sleep-on-LAN
+// pipeline.  Must be called before Start.
+func (m *RouteManager) SetIdleTracker(tracker ActivityRecorder) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cancel != nil {
+		m.logger.Warn("SetIdleTracker called after Start; ignoring")
+		return
+	}
+
+	m.idleTracker = tracker
 }
 
 // Start initializes and starts HTTP listeners for all configured routes.
@@ -353,7 +369,11 @@ func (m *RouteManager) GetActiveRouteCount() int {
 }
 
 func (m *RouteManager) createListener(route config.Route) *routeListener {
-	proxyHandler := NewProxyHandler(route.Upstream, m.logger)
+	proxyOpts := make([]ProxyHandlerOption, 0, 1)
+	if m.idleTracker != nil {
+		proxyOpts = append(proxyOpts, WithActivityRecorder(m.idleTracker, route.Name))
+	}
+	proxyHandler := NewProxyHandler(route.Upstream, m.logger, proxyOpts...)
 	handler, closer := m.wrapWithWakeCoordinator(route, proxyHandler)
 	wrappedHandler := m.middleware(handler)
 

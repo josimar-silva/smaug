@@ -10,6 +10,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 )
 
 // ConfigManager handles configuration loading and hot-reloading.
@@ -25,6 +26,7 @@ type ConfigManager struct {
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 	log      *logger.Logger
+	metrics  *metrics.Registry // Metrics registry (optional)
 }
 
 // NewManager creates a new ConfigManager and starts watching the config file.
@@ -70,6 +72,12 @@ func NewManager(path string, log *logger.Logger) (*ConfigManager, error) {
 	go cm.watch()
 
 	return cm, nil
+}
+
+// SetMetrics sets the metrics registry for recording config reload outcomes.
+// Should be called before the manager is actively used.
+func (cm *ConfigManager) SetMetrics(reg *metrics.Registry) {
+	cm.metrics = reg
 }
 
 // GetConfig returns the current configuration in a thread-safe manner.
@@ -180,6 +188,10 @@ func (cm *ConfigManager) reload() {
 	newConfig, err := Load(cm.path)
 	if err != nil {
 		cm.log.Error("failed to reload config", "error", err)
+		// Record failed reload metric
+		if cm.metrics != nil {
+			cm.metrics.Config.RecordConfigReload(false)
+		}
 		return
 	}
 
@@ -191,4 +203,8 @@ func (cm *ConfigManager) reload() {
 	}
 
 	cm.log.Info("config reloaded successfully")
+	// Record successful reload metric
+	if cm.metrics != nil {
+		cm.metrics.Config.RecordConfigReload(true)
+	}
 }

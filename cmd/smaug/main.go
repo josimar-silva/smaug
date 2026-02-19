@@ -13,6 +13,7 @@ import (
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 	mgmhealth "github.com/josimar-silva/smaug/internal/management/health"
 	"github.com/josimar-silva/smaug/internal/middleware"
 	"github.com/josimar-silva/smaug/internal/proxy"
@@ -65,6 +66,15 @@ func initLogger(cfg *config.Config, oldLog *logger.Logger) *logger.Logger {
 		fmt.Fprintf(os.Stderr, "failed to stop original logger: %v\n", err)
 	}
 	return log
+}
+
+func initMetrics(log *logger.Logger) (*metrics.Registry, error) {
+	m, err := metrics.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
+	}
+	log.Info("metrics registry initialized", "operation", "init_metrics")
+	return m, nil
 }
 
 func initConfigManager(configPath string, log *logger.Logger) (*config.ConfigManager, error) {
@@ -299,6 +309,12 @@ func run() error {
 
 	log.Info("starting smaug", "config_path", configPath)
 
+	// Initialize metrics
+	m, err := initMetrics(log)
+	if err != nil {
+		return err
+	}
+
 	healthStore := store.NewInMemoryHealthStore()
 
 	healthManager, err := initHealthManager(cfg, healthStore, log)
@@ -311,14 +327,29 @@ func run() error {
 		}
 	}()
 
+	// Wire metrics into health manager
+	healthManager.SetMetrics(m)
+
 	wakeOpts, err := initWakeOptions(cfg, log)
 	if err != nil {
 		return err
 	}
 
+	// Wire metrics into Gwaihir client
+	if wakeOpts != nil && wakeOpts.Sender != nil {
+		if client, ok := wakeOpts.Sender.(*gwaihir.Client); ok {
+			client.SetMetrics(m)
+		}
+	}
+
 	idleTracker, err := initIdleTracker(cfg, log)
 	if err != nil {
 		return err
+	}
+
+	// Wire metrics into idle tracker
+	if idleTracker != nil {
+		idleTracker.SetMetrics(m)
 	}
 
 	var shutdownCtx context.Context
@@ -346,6 +377,12 @@ func run() error {
 			log.Error("failed to stop route manager", "error", err)
 		}
 	}()
+
+	// Wire metrics into route manager
+	routeManager.SetMetrics(m)
+
+	// Wire metrics into config manager
+	configMgr.SetMetrics(m)
 
 	sleepCoordinator, err := initSleepCoordinator(cfg, idleTracker, log)
 	if err != nil {

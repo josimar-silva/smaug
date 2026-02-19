@@ -1,7 +1,7 @@
 package main
 
 // Version information. Updated by release process.
-const Version = "0.2.0"
+const Version = "0.2.1-SNAPSHOT"
 
 // BuildTime is set during build via ldflags
 var BuildTime = "unknown"

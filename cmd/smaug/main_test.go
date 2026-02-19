@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -10,8 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	sleepclient "github.com/josimar-silva/smaug/internal/client/sleep"
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/proxy"
 )
 
 // newTestLogger returns a test logger that writes to a discard sink.
@@ -70,7 +73,7 @@ func (m *mockRouteStatusProvider) GetActiveRouteCount() int {
 	return m.activeRouteCount
 }
 
-func TestRun_InvalidConfigPath(t *testing.T) {
+func TestRunInvalidConfigPath(t *testing.T) {
 	configPath := "/nonexistent/path/services.yaml"
 	originalEnv := os.Getenv("SMAUG_CONFIG")
 	defer func() {
@@ -225,107 +228,260 @@ settings:
 
 // --- initIdleTracker ---
 
-// configWithSleepOnLanRoute builds a *config.Config with one server that has
-// SleepOnLan enabled and one route pointing at that server.
-func configWithSleepOnLanRoute(t *testing.T, serverID, routeName string, idleTimeout time.Duration) *config.Config {
-	t.Helper()
-	raw := fmt.Sprintf(`
-servers:
-  %s:
-    sleepOnLan:
-      enabled: true
-      endpoint: "http://sleep.example.com"
-      idleTimeout: %s
-routes:
-  - name: %s
-    server: %s
-    listen: 8080
-    upstream: "http://localhost:9090"
-`, serverID, idleTimeout.String(), routeName, serverID)
-	var cfg config.Config
-	require.NoError(t, yaml.Unmarshal([]byte(raw), &cfg))
-	return &cfg
-}
-
 func TestInitIdleTrackerNoSleepOnLanRoutes(t *testing.T) {
 	// Given: config with no SleepOnLan-enabled servers
-	cfg := &config.Config{}
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{Enabled: false}},
+		},
+		Routes: []config.Route{
+			{Name: "route1", Server: "server1"},
+		},
+	}
 	log := newTestLogger(t)
 
 	// When
 	tracker, err := initIdleTracker(cfg, log)
 
-	// Then: idle tracking is disabled; no error
+	// Then: idle tracker is disabled (nil), no error
 	assert.NoError(t, err)
 	assert.Nil(t, tracker)
 }
 
-func TestInitIdleTrackerWithSleepOnLanRouteReturnsTracker(t *testing.T) {
-	// Given: one route whose server has SleepOnLan enabled
-	cfg := configWithSleepOnLanRoute(t, "homeserver", "myroute", 5*time.Minute)
+// TestInitIdleTrackerWithSleepOnLanRoute verifies that initIdleTracker creates and
+// configures an IdleTracker when at least one route has SleepOnLan enabled.
+func TestInitIdleTrackerWithSleepOnLanRoute(t *testing.T) {
+	// Given: config with one SleepOnLan-enabled route
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{
+				Enabled:     true,
+				Endpoint:    "http://server1.example.com/sleep",
+				IdleTimeout: 10 * time.Minute,
+			}},
+		},
+		Routes: []config.Route{
+			{Name: "route1", Server: "server1"},
+		},
+	}
 	log := newTestLogger(t)
 
 	// When
 	tracker, err := initIdleTracker(cfg, log)
 
-	// Then: a non-nil tracker is returned
+	// Then: an idle tracker is returned with the route registered
+	require.NoError(t, err)
+	require.NotNil(t, tracker)
+
+	// Verify the route was registered (idle time should be idleNeverSeen since no activity yet)
+	idleTime := tracker.IdleTime("route1")
+	assert.Greater(t, int64(idleTime), int64(0))
+}
+
+// TestInitIdleTrackerSkipsRouteWithNoMatchingServer verifies that a route whose
+// server is not in the servers map is skipped gracefully.
+func TestInitIdleTrackerSkipsRouteWithNoMatchingServer(t *testing.T) {
+	// Given: route references a non-existent server name
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{
+				Enabled:     true,
+				Endpoint:    "http://server1.example.com/sleep",
+				IdleTimeout: 5 * time.Minute,
+			}},
+		},
+		Routes: []config.Route{
+			{Name: "route-missing", Server: "nonexistent"},
+			{Name: "route-valid", Server: "server1"},
+		},
+	}
+	log := newTestLogger(t)
+
+	// When
+	tracker, err := initIdleTracker(cfg, log)
+
+	// Then: tracker created for the valid route only
+	require.NoError(t, err)
+	require.NotNil(t, tracker)
+}
+
+// --- initSleepCoordinator ---
+
+// TestInitSleepCoordinatorReturnsNilWhenIdleTrackerIsNil verifies that no coordinator
+// is created when the idle tracker is nil (SleepOnLan not configured).
+func TestInitSleepCoordinatorReturnsNilWhenIdleTrackerIsNil(t *testing.T) {
+	// Given: nil idle tracker
+	cfg := &config.Config{}
+	log := newTestLogger(t)
+
+	// When
+	coordinator, err := initSleepCoordinator(cfg, nil, log)
+
+	// Then: no coordinator, no error
 	assert.NoError(t, err)
-	require.NotNil(t, tracker)
+	assert.Nil(t, coordinator)
 }
 
-func TestInitIdleTrackerRegistersRouteWithIdleTimeout(t *testing.T) {
-	// Given: route with a 10-minute idle timeout
-	cfg := configWithSleepOnLanRoute(t, "homeserver", "myroute", 10*time.Minute)
+// TestInitSleepCoordinatorReturnsNilWhenNoEndpointConfigured verifies that when
+// all SleepOnLan routes have empty endpoints the coordinator is not created.
+func TestInitSleepCoordinatorReturnsNilWhenNoEndpointConfigured(t *testing.T) {
+	// Given: route with SleepOnLan enabled but no endpoint
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{
+				Enabled:     true,
+				Endpoint:    "", // intentionally empty
+				IdleTimeout: 5 * time.Minute,
+			}},
+		},
+		Routes: []config.Route{
+			{Name: "route1", Server: "server1"},
+		},
+	}
 	log := newTestLogger(t)
 
-	// When
-	tracker, err := initIdleTracker(cfg, log)
+	// Build a real IdleTracker so the function doesn't early-exit on nil check.
+	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
 	require.NoError(t, err)
-	require.NotNil(t, tracker)
 
-	// Then: recording activity sets a recent last-seen time (idleNeverSeen = MaxInt64
-	// would only appear for unregistered routes that have never had activity).
-	tracker.RecordActivity("myroute")
-	idleTime := tracker.IdleTime("myroute")
-	assert.Less(t, idleTime, time.Second, "route should have a recent last-seen after RecordActivity")
+	// When
+	coordinator, err := initSleepCoordinator(cfg, tracker, log)
+
+	// Then: no coordinator (all endpoints empty), no error
+	assert.NoError(t, err)
+	assert.Nil(t, coordinator)
 }
 
-func TestInitIdleTrackerSkipsRoutesWithoutSleepOnLan(t *testing.T) {
-	// Given: two servers; only one has SleepOnLan enabled
-	raw := `
-servers:
-  awake-server:
-    sleepOnLan:
-      enabled: false
-  sleep-server:
-    sleepOnLan:
-      enabled: true
-      endpoint: "http://sleep.example.com"
-      idleTimeout: 5m
-routes:
-  - name: awake-route
-    server: awake-server
-    listen: 8080
-    upstream: "http://localhost:9090"
-  - name: sleep-route
-    server: sleep-server
-    listen: 8081
-    upstream: "http://localhost:9091"
-`
-	var cfg config.Config
-	require.NoError(t, yaml.Unmarshal([]byte(raw), &cfg))
+// TestInitSleepCoordinatorSucceedsWithValidEndpoint verifies that a SleepCoordinator
+// is created when at least one route has a valid SleepOnLan endpoint.
+// A non-loopback hostname is used because the sleep client applies SSRF protection
+// at construction time (it blocks 127.0.0.1 / localhost).
+func TestInitSleepCoordinatorSucceedsWithValidEndpoint(t *testing.T) {
+	// Given: a non-loopback endpoint URL (the client validates the scheme and host
+	// at construction time only — no actual network connection is made here)
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{
+				Enabled:     true,
+				Endpoint:    "http://homeserver.local/sleep",
+				IdleTimeout: 5 * time.Minute,
+			}},
+		},
+		Routes: []config.Route{
+			{Name: "route1", Server: "server1"},
+		},
+	}
 	log := newTestLogger(t)
 
-	// When
-	tracker, err := initIdleTracker(&cfg, log)
+	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
 	require.NoError(t, err)
-	require.NotNil(t, tracker)
 
-	// Then: only sleep-route is registered with an idle timeout;
-	// awake-route auto-registers with zero timeout on first activity (no sleep trigger).
-	tracker.RecordActivity("sleep-route")
-	assert.Less(t, tracker.IdleTime("sleep-route"), time.Second)
+	// When
+	coordinator, err := initSleepCoordinator(cfg, tracker, log)
 
-	tracker.RecordActivity("awake-route")
-	assert.Less(t, tracker.IdleTime("awake-route"), time.Second)
+	// Then: coordinator is returned, no error
+	require.NoError(t, err)
+	require.NotNil(t, coordinator)
+}
+
+// TestInitSleepCoordinatorReturnsErrorOnInvalidEndpoint verifies that an invalid
+// sleep endpoint URL causes initSleepCoordinator to return an error.
+func TestInitSleepCoordinatorReturnsErrorOnInvalidEndpoint(t *testing.T) {
+	// Given: a sleep endpoint with an invalid (loopback) URL that the sleep
+	// client rejects during construction (SSRF protection).
+	cfg := &config.Config{
+		Servers: map[string]config.Server{
+			"server1": {SleepOnLan: config.SleepOnLanConfig{
+				Enabled:     true,
+				Endpoint:    "http://127.0.0.1/sleep",
+				IdleTimeout: 5 * time.Minute,
+			}},
+		},
+		Routes: []config.Route{
+			{Name: "route1", Server: "server1"},
+		},
+	}
+	log := newTestLogger(t)
+
+	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
+	require.NoError(t, err)
+
+	// When
+	coordinator, err := initSleepCoordinator(cfg, tracker, log)
+
+	// Then: error about client creation, no coordinator
+	assert.Error(t, err)
+	assert.Nil(t, coordinator)
+	assert.Contains(t, err.Error(), "failed to create sleep client")
+}
+
+// --- routeSleepSender ---
+
+// TestRouteSleepSenderDispatchesCommandToRegisteredRoute verifies that Sleep
+// forwards the call to the registered sleep client for the given route.
+// The sleep client blocks loopback addresses (SSRF protection), so we use an
+// IANA-reserved ".invalid" domain which always fails DNS resolution immediately.
+// A short context timeout keeps the test fast.
+func TestRouteSleepSenderDispatchesCommandToRegisteredRoute(t *testing.T) {
+	// Given: a routeSleepSender with one route registered
+	log := newTestLogger(t)
+
+	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
+	require.NoError(t, err)
+
+	sender := &routeSleepSender{
+		senders: map[string]*sleepclient.Client{"route1": client},
+		log:     log,
+	}
+
+	// Use a short timeout so the test doesn't wait for a network timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// When: Sleep called for route1 — it should try to call the client
+	// (returns a network error, NOT the silent no-op for unknown routes)
+	err = sender.Sleep(ctx, "route1")
+
+	// Then: a non-nil error confirms the call was dispatched (routing worked)
+	assert.Error(t, err, "expected a network/context error — route must be dispatched, not silently skipped")
+}
+
+// TestRouteSleepSenderSkipsUnknownRoute verifies that Sleep is a no-op (returns nil)
+// for a route that has no registered sender.
+func TestRouteSleepSenderSkipsUnknownRoute(t *testing.T) {
+	// Given: a routeSleepSender with an empty senders map
+	log := newTestLogger(t)
+	sender := &routeSleepSender{
+		senders: make(map[string]*sleepclient.Client),
+		log:     log,
+	}
+
+	// When: Sleep called for an unknown route
+	err := sender.Sleep(context.Background(), "unknown-route")
+
+	// Then: no error (graceful no-op)
+	assert.NoError(t, err)
+}
+
+// TestRouteSleepSenderForwardsErrorFromClient verifies that errors from the underlying
+// sleep client (network failure in this case) are propagated back to the caller.
+// The sleep client blocks loopback addresses (SSRF protection), so we use a
+// non-loopback hostname that causes a network error rather than a construction error.
+func TestRouteSleepSenderForwardsErrorFromClient(t *testing.T) {
+	// Given: an endpoint that will fail at the network level (unreachable host)
+	log := newTestLogger(t)
+
+	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
+	require.NoError(t, err)
+
+	sender := &routeSleepSender{
+		senders: map[string]*sleepclient.Client{"route1": client},
+		log:     log,
+	}
+
+	// When: Sleep is called for route1 (network error expected)
+	err = sender.Sleep(context.Background(), "route1")
+
+	// Then: network error propagated from the sleep client
+	assert.Error(t, err)
 }

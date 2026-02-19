@@ -99,30 +99,30 @@ graph TB
             IdleTracker["Idle Tracker"]
             MetricsExp["Metrics Exporter<br/>(:2112)"]
         end
-        
+
         subgraph Gwaihir_Box["Gwaihir (Privileged)"]
             WoLSender["WoL Sender"]
         end
-        
+
         Clients["Clients<br/>(OpenWebUI, Agents)"]
     end
-    
+
     Backend["Backend Server<br/>(Ollama, Marker, etc)<br/>GPU Workload<br/>WoL-Enabled"]
-    
+
     Clients -->|HTTP Request| SMAUG_Box
     ConfigMgr --> RouteMgr
     RouteMgr --> ProxyHandler
     ProxyHandler --> HealthChecker
     HealthChecker --> IdleTracker
     IdleTracker --> MetricsExp
-    
+
     HealthChecker -->|Check Health| Backend
     IdleTracker -->|API Call<br/>POST /wol| Gwaihir_Box
     Gwaihir_Box -->|UDP :9<br/>WoL Magic Packet| Backend
     IdleTracker -->|Sleep Request| Backend
     ProxyHandler -->|HTTP Proxy| Backend
     Backend -->|Response| Clients
-    
+
     style K8s fill:#e1f5ff
     style SMAUG_Box fill:#fff3e0
     style Gwaihir_Box fill:#f3e5f5
@@ -140,10 +140,10 @@ sequenceDiagram
     participant HealthCheck as Health<br/>Checker
     participant Gwaihir
     participant Backend
-    
+
     Client->>SMAUG: Request (port 11434)
     SMAUG->>HealthCheck: Check backend health
-    
+
     alt Backend Unhealthy
         HealthCheck->>Gwaihir: POST /wol<br/>(Machine ID: backend)
         Gwaihir->>Backend: UDP :9<br/>WoL Magic Packet
@@ -153,11 +153,11 @@ sequenceDiagram
     else Backend Already Healthy
         Backend-->>HealthCheck: 200 OK /api/tags
     end
-    
+
     SMAUG->>Backend: Proxy request<br/>HTTP GET /api/chat
     Backend-->>SMAUG: Response (AI output)
     SMAUG-->>Client: Transparent proxy response
-    
+
     Note over SMAUG: Track request for<br/>idle detection
 ```
 
@@ -172,10 +172,10 @@ sequenceDiagram
     participant IdleTracker
     participant SMAUG
     participant Backend
-    
+
     Note over IdleTracker: Monitor request activity
     IdleTracker->>IdleTracker: No traffic for 5m?
-    
+
     alt Idle Timeout Reached
         IdleTracker->>Backend: POST /sleep<br/>(graceful shutdown)
         Backend->>Backend: Save state
@@ -205,11 +205,11 @@ settings:
   logging:
     level: info
     format: json  # structured logging
-  
+
   # Observability configuration
   # Controls which infrastructure endpoints are exposed
   observability:
-    # Health check endpoints: /health, /live, /ready /version
+    # Health check endpoints: /health, /live, /ready, /version
     healthCheck:
       enabled: true
       port: 2111
@@ -225,16 +225,21 @@ servers:
 
     wakeOnLan:
       enabled: true
+      machineId: "saruman"       # Gwaihir machine ID
       timeout: 60s
-      debounce: 5s  # Min interval between WoL attempts
+      debounce: 5s               # Min interval between WoL attempts
 
     sleepOnLan:
       enabled: true
       endpoint: "http://saruman.from-gondor.com:8000/sleep"
-      idleTimeout: 5m  # Sleep after 5 min idle
-      allowedHosts:    # SSRF protection
-        - "*.from-gondor.com"
-        - "192.168.1.*"
+      authToken: "${SLEEP_ON_LAN_TOKEN}"  # Env var substitution
+      idleTimeout: 5m            # Sleep after 5 min idle
+
+    healthCheck:
+      endpoint: "http://saruman.from-gondor.com:8000/status"
+      authToken: "${HEALTH_CHECK_TOKEN}"  # Optional: base64-encoded user:password for Basic Auth
+      interval: 2s
+      timeout: 2s
 
 # Route definitions (port-per-service)
 routes:
@@ -242,24 +247,16 @@ routes:
     listen: 11434
     upstream: "http://saruman.from-gondor.com:11434"
     server: saruman
-    healthCheck:
-      path: "/api/tags"
-      interval: 2s
-      timeout: 2s
 
   - name: marker
     listen: 8080
     upstream: "http://saruman.from-gondor.com:8080"
     server: saruman
-    healthCheck:
-      path: "/health"
-      interval: 2s
-      timeout: 2s
 ```
 
 ### Environment Variables
 
-- `SMAUG_CONFIG` - Path to configuration file (default: `/etc/smaug/config.yaml`)
+- `SMAUG_CONFIG` - Path to configuration file (default: `/etc/smaug/services.yaml`)
 - `GWAIHIR_API_KEY` - API key for Gwaihir service (required if WoL enabled)
 - `SMAUG_LOG_LEVEL` - Log level: debug|info|warn|error (default: info)
 - `SMAUG_LOG_FORMAT` - Log format: json|text (default: json)
@@ -292,7 +289,7 @@ just test
 just build
 
 # Run locally
-export SMAUG_CONFIG=configs/smaug.yaml
+export SMAUG_CONFIG=config/smaug.example.yaml
 export GWAIHIR_API_KEY=your-secret-key
 just run
 ```
@@ -303,7 +300,7 @@ just run
 docker run -d \
   --name smaug \
   --network host \
-  -v /path/to/config.yaml:/etc/smaug/config.yaml:ro \
+  -v /path/to/config.yaml:/etc/smaug/services.yaml:ro \
   -e GWAIHIR_API_KEY=your-secret-key \
   -e SMAUG_LOG_LEVEL=info \
   ghcr.io/josimar-silva/smaug:latest
@@ -316,7 +313,7 @@ See [docs/adrs/ADR-001-foundation.md](docs/adrs/ADR-001-foundation.md) for compl
 Quick start:
 
 ```bash
-# Create ConfigMap with routes.yaml
+# Create ConfigMap with services.yaml
 kubectl create configmap smaug-config --from-file=services.yaml
 
 # Apply manifests
@@ -342,11 +339,12 @@ internal/
 ├── config/           # Configuration parsing
 ├── middleware/       # HTTP middleware
 ├── infrastructure/   # Logging, metrics, etc.
-└── management/       # Server Management
+├── management/       # Server Management
+└── client/           # External service clients (Gwaihir, sleep)
 
 cmd/smaug/            # Application entry point
 tests/                # Integration tests
-configs/              # Example configurations
+config/               # Example configurations
 ```
 
 ### Build & Test
@@ -374,7 +372,7 @@ just docker-build latest
 
 ### Architecture Decisions
 
-Key decisions documented in [ADRS](docs/adrs/REAMED.md):
+Key decisions documented in [ADRs](docs/adrs/README.md):
 
 ---
 
@@ -386,13 +384,17 @@ Available on port 2112 (`/metrics` endpoint).
 
 Key metrics:
 
-- `smaug_wol_packets_sent_total` - Successful WoL packets sent
-- `smaug_wol_packets_failed_total` - Failed WoL attempts
-- `smaug_server_state` - Server state gauge (1=awake, 0=sleeping)
+- `smaug_wake_attempts_total` - WoL wake attempts by server and success status
+- `smaug_server_awake` - Server state gauge (1=awake, 0=sleeping) by server
+- `smaug_health_check_failures_total` - Health check failures by server and reason
+- `smaug_sleep_triggered_total` - Servers put to sleep due to idle timeout
 - `smaug_request_duration_seconds` - Proxy request latency (histogram)
-- `smaug_health_check_failures_total` - Health check failures
-- `smaug_sleep_triggered_total` - Servers put to sleep (idle timeout)
-- `smaug_gwaihir_api_errors_total` - Gwaihir API errors
+- `smaug_requests_total` - Total HTTP requests processed
+- `smaug_requests_by_status_total` - HTTP requests by status code
+- `smaug_requests_by_method_total` - HTTP requests by method
+- `smaug_config_reload_total` - Config reload attempts by success status
+- `smaug_gwaihir_api_calls_total` - Gwaihir API calls by operation and success status
+- `smaug_gwaihir_api_duration_seconds` - Gwaihir API call duration (histogram)
 
 ### Structured Logging
 
@@ -412,8 +414,12 @@ Example log entry:
 
 ### Health Checks
 
-- **Liveness:** `/metrics` endpoint must be reachable
-- **Readiness:** All configured routes must be listening
+Management server runs on port 2111 (configurable) and exposes:
+
+- **`/live`:** Kubernetes liveness probe — returns `{"status":"alive"}` when the process is running
+- **`/ready`:** Kubernetes readiness probe — returns 503 when no routes are active
+- **`/health`:** Overall application health including active route count and uptime
+- **`/version`:** Build version, git commit, and build time
 
 K8s probes configured in deployment manifest.
 
@@ -428,7 +434,7 @@ K8s probes configured in deployment manifest.
 - **Authentication:** Gwaihir API key stored in K8s Secret (not ConfigMap)
 - **Input Validation:** Config schema validation, URL parsing
 - **Rate Limiting:** 1 WoL request per 10s per server, prevents DoS attacks
-- **SSRF Protection:** Sleep endpoint validation with allowlist
+- **Secret Redaction:** API keys and auth tokens are redacted in logs and config marshalling
 
 ### Threat Mitigations
 
@@ -437,8 +443,9 @@ K8s probes configured in deployment manifest.
 | Gwaihir API abuse | API key auth + NetworkPolicy + rate limiting |
 | Config tampering | RBAC + validation + hash verification |
 | Wake flooding DoS | Rate limiting (1/10s per server) + debounce |
-| Sleep API SSRF | Endpoint allowlist + scheme validation |
+| Sleep API SSRF | Endpoint validation + scheme validation |
 | Metrics info disclosure | NetworkPolicy (Prometheus only) |
+| Secret leakage in logs | SecretString type redacts values in all output |
 
 See [ADR-001: Security Considerations](docs/adrs/ADR-001-foundation.md#security-considerations) for full threat model.
 
@@ -549,7 +556,7 @@ just test
 
 ## Documentation
 
-- [ADRs](docs/adrs/REAME.md) - Comprehensive design decisions, deployment specs, security model, observability strategy
+- [ADRs](docs/adrs/README.md) - Comprehensive design decisions, deployment specs, security model, observability strategy
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution process and standards
 
 ---

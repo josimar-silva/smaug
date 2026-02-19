@@ -19,15 +19,18 @@ Smaug uses a **simplified layered architecture** that's pragmatic and maintainab
 
 ```
 internal/
-├── proxy/            # Proxy and routes
-├── store/            # Storage
-├── health/           # Server health checker
-├── config/           # Configuration parsing
-├── middleware/       # HTTP middleware
-├── infrastructure/   # Logging, metrics, etc.
-└── management/       # Server Management
+├── proxy/            # Proxy, route manager, idle tracker, wake/sleep coordinators
+├── store/            # In-memory health store
+├── health/           # Server health checker and health manager
+├── config/           # Configuration loading, parsing, and hot-reload
+├── middleware/       # HTTP middleware (logging, recovery, metrics)
+├── infrastructure/   # Logging (logger) and metrics (Prometheus registry)
+├── management/       # Management HTTP servers (health endpoints, metrics endpoint)
+└── client/           # External service clients (Gwaihir WoL, sleep endpoint)
 
 cmd/smaug/            # Application entrypoint
+tests/                # Integration tests
+config/               # Example configuration files
 ```
 
 ## Code Conventions
@@ -65,9 +68,9 @@ Apply functional principles where appropriate:
 
 ### Naming Conventions
 
-- **Interfaces:** Descriptive names (e.g., `MachineRepository`, `WoLUseCase`)
-- **Implementations:** Include implementation detail (e.g., `InMemoryMachineRepository`)
-- **Methods:** Clear action verbs (e.g., `SendWoLPacket`, `GetMachine`, `ListMachines`)
+- **Interfaces:** Descriptive names (e.g., `HealthStore`, `WoLSender`, `ActivityRecorder`)
+- **Implementations:** Include implementation detail (e.g., `InMemoryHealthStore`)
+- **Methods:** Clear action verbs (e.g., `SendWoL`, `Get`, `RecordActivity`)
 - **Variables:** Descriptive, avoid single letters except in very short scopes
 - **Errors:** Use domain-specific errors (see Error Handling section below)
 
@@ -79,25 +82,21 @@ Define domain errors close to where they're used (in the same package). Use `err
 
 ```go
 // Define domain errors at the package level
-// Example: internal/service/health/health.go
+// Example: internal/proxy/wake_coordinator.go
 var (
-    // ErrHealthCheckFailed is returned when a health check fails due to an unhealthy status code (4xx, 5xx).
-    ErrHealthCheckFailed = errors.New("health check failed: unhealthy status code")
+    // ErrMissingServerID is returned when WakeCoordinatorConfig.ServerID is empty.
+    ErrMissingServerID = errors.New("server ID must not be empty")
 
-    // ErrHealthCheckNetworkError is returned when a health check request fails due to network issues.
-    ErrHealthCheckNetworkError = errors.New("health check failed: network error")
+    // ErrWakeTimeout is returned when the server does not become healthy within WakeTimeout.
+    ErrWakeTimeout = errors.New("server did not become healthy within wake timeout")
 )
 
 // Wrap domain errors with context using %w (preserves error chain for errors.Is())
-return fmt.Errorf("%w: %s returned status %d", ErrHealthCheckFailed, url, statusCode)
+return fmt.Errorf("%w: %w", ErrWakeTimeout, ctx.Err())
 
 // Check for specific domain errors using errors.Is()
-if errors.Is(err, ErrHealthCheckNetworkError) {
-    // Handle network error specifically
-}
-
-if errors.Is(err, ErrHealthCheckFailed) {
-    // Handle unhealthy status code
+if errors.Is(err, ErrWakeTimeout) {
+    // Handle wake timeout specifically
 }
 ```
 
@@ -115,13 +114,12 @@ Always use structured logging with `log/slog`:
 ```go
 // Good: Structured logging with context
 logger.Info("Sending WoL packet",
+    slog.String("server_id", serverID),
     slog.String("machine_id", machineID),
-    slog.String("mac", machine.MAC),
-    slog.String("broadcast", machine.Broadcast),
 )
 
 // Bad: Unstructured logging
-logger.Info("Sending WoL packet to " + machineID)
+logger.Info("Sending WoL packet to " + serverID)
 ```
 
 ### Metrics
@@ -129,13 +127,14 @@ logger.Info("Sending WoL packet to " + machineID)
 Record metrics for important operations:
 
 ```go
-// Counter for operations
-metrics.WoLPacketsSentTotal.Inc()
-metrics.WoLPacketsFailedTotal.Inc()
+// Counter for operations (with labels)
+metrics.Power.RecordWakeAttempt(serverID, success)
 
-// Histogram for durations
-timer := prometheus.NewTimer(metrics.RequestDuration.WithLabelValues(method, path, status))
-defer timer.ObserveDuration()
+// Gauge for state
+metrics.Power.SetServerAwake(serverID, awake)
+
+// Record request metrics
+metrics.Request.RecordRequest(method, statusCode, durationSeconds)
 ```
 
 ## Testing Standards
@@ -147,11 +146,11 @@ Always follow TDD principles:
 1. **Red Phase:** Write failing test first
    - Test defines the expected behavior
    - Test fails initially (no implementation yet)
-   
+
 2. **Green Phase:** Write minimal implementation
    - Just enough code to make the test pass
    - Don't over-engineer at this stage
-   
+
 3. **Refactor Phase:** Improve code quality
    - Refactor production code while keeping tests green
    - Refactor tests for clarity and maintainability
@@ -195,32 +194,36 @@ Treat test code with the same rigor as production code:
 Follow the **Given-When-Then** pattern:
 
 ```go
-func TestWoLUseCase_SendWoLPacket_Success(t *testing.T) {
+func TestWakeCoordinator_ServeHTTP_WakesServerWhenUnhealthy(t *testing.T) {
     // Given: Set up test dependencies and data
     ctx := context.Background()
-    machineID := "gandalf"
-    mockRepo := &MockMachineRepository{
-        GetMachineFunc: func(ctx context.Context, id string) (*domain.Machine, error) {
-            if id == machineID {
-                return &domain.Machine{
-                    ID:        machineID,
-                    MAC:       "AA:BB:CC:DD:EE:FF",
-                    Broadcast: "192.168.1.255",
-                }, nil
-            }
-            return nil, domain.ErrMachineNotFound
+    log := logger.New(logger.LevelDebug, logger.JSON, nil)
+    store := store.NewInMemoryHealthStore()
+    mockSender := &mockWoLSender{}
+    downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+    })
+    coordinator, err := proxy.NewWakeCoordinator(
+        proxy.WakeCoordinatorConfig{
+            ServerID:    "saruman",
+            MachineID:   "saruman",
+            WakeTimeout: 5 * time.Second,
         },
-    }
-    mockSender := &MockWoLPacketSender{}
-    useCase := NewWoLUseCase(mockRepo, mockSender, logger, metrics)
+        downstream,
+        mockSender,
+        store,
+        log,
+        nil,
+    )
+    require.NoError(t, err)
 
     // When: Execute the function being tested
-    err := useCase.SendWoLPacket(ctx, machineID)
+    req := httptest.NewRequest(http.MethodGet, "/", nil)
+    w := httptest.NewRecorder()
+    coordinator.ServeHTTP(w, req)
 
     // Then: Verify results and side effects
-    assert.NoError(t, err)
-    assert.Equal(t, 1, mockSender.SendCallCount())
-    assert.Equal(t, "AA:BB:CC:DD:EE:FF", mockSender.LastMAC())
+    assert.Equal(t, 1, mockSender.sendCallCount)
 }
 ```
 
@@ -235,21 +238,14 @@ func TestWoLUseCase_SendWoLPacket_Success(t *testing.T) {
 **Example Mock Implementation:**
 
 ```go
-type MockMachineRepository struct {
-    GetMachineCalls []*domain.GetMachineCall
-    GetMachineFunc  func(context.Context, string) (*domain.Machine, error)
+type mockWoLSender struct {
+    sendCallCount int
+    sendErr       error
 }
 
-func (m *MockMachineRepository) GetMachine(ctx context.Context, id string) (*domain.Machine, error) {
-    m.GetMachineCalls = append(m.GetMachineCalls, &domain.GetMachineCall{ID: id})
-    if m.GetMachineFunc != nil {
-        return m.GetMachineFunc(ctx, id)
-    }
-    return nil, nil
-}
-
-func (m *MockMachineRepository) GetMachineCallCount() int {
-    return len(m.GetMachineCalls)
+func (m *mockWoLSender) SendWoL(ctx context.Context, machineID string) error {
+    m.sendCallCount++
+    return m.sendErr
 }
 ```
 
@@ -258,34 +254,28 @@ func (m *MockMachineRepository) GetMachineCallCount() int {
 Use table-driven tests for multiple scenarios with the same logic:
 
 ```go
-func TestMachine_Validate(t *testing.T) {
+func TestConfig_Validate(t *testing.T) {
     tests := []struct {
         name    string
-        machine domain.Machine
+        cfg     config.Config
         wantErr bool
         errType error
     }{
         {
-            name:    "valid machine with all fields",
-            machine: domain.Machine{ID: "test", MAC: "AA:BB:CC:DD:EE:FF", Broadcast: "192.168.1.255"},
+            name:    "valid config with all fields",
+            cfg:     buildValidConfig(),
             wantErr: false,
         },
         {
-            name:    "invalid MAC address format",
-            machine: domain.Machine{ID: "test", MAC: "invalid", Broadcast: "192.168.1.255"},
-            wantErr: true,
-            errType: domain.ErrInvalidMAC,
-        },
-        {
-            name:    "empty machine ID",
-            machine: domain.Machine{ID: "", MAC: "AA:BB:CC:DD:EE:FF", Broadcast: "192.168.1.255"},
+            name:    "missing route upstream",
+            cfg:     buildConfigWithEmptyUpstream(),
             wantErr: true,
         },
     }
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            err := tt.machine.Validate()
+            err := tt.cfg.Validate()
             if tt.wantErr {
                 assert.Error(t, err)
                 if tt.errType != nil {
@@ -304,21 +294,18 @@ func TestMachine_Validate(t *testing.T) {
 Extract common test setup into reusable helpers:
 
 ```go
-// testdata.go - Helper functions for test data
-func NewValidMachine(id string) *domain.Machine {
-    return &domain.Machine{
-        ID:        id,
+// Helper functions for test data
+func buildValidConfig() config.Config {
+    return config.Config{
+        Routes: []config.Route{
+            {Name: "ollama", Listen: 11434, Upstream: "http://localhost:11434"},
+        },
     }
-}
-
-func NewMachineWithMAC(id, mac string) *domain.Machine {
-    machine := NewValidMachine(id)
-    return machine
 }
 
 // In tests:
 func TestSomething(t *testing.T) {
-    machine := NewValidMachine("saruman")
+    cfg := buildValidConfig()
     // ...
 }
 ```
@@ -387,52 +374,46 @@ Use Conventional Commits format for all commit messages:
 - `ci:` CI/CD configuration changes
 
 **Scopes:**
-- `domain` - Domain layer (entities, errors)
-- `usecase` - Use case/business logic layer
-- `delivery` - Delivery layer (HTTP handlers, routes)
-- `repository` - Data access layer
-- `infrastructure` - Infrastructure concerns (logging, metrics, WoL)
-- `config` - Configuration files
+- `proxy` - Proxy, route manager, wake/sleep coordination
+- `health` - Health checker and health manager
+- `config` - Configuration loading, parsing, validation
+- `middleware` - HTTP middleware
+- `infrastructure` - Logging, metrics
+- `management` - Management HTTP servers
+- `client` - External service clients (Gwaihir, sleep)
+- `store` - In-memory stores
 - `ci` - CI/CD workflows
 
 **Examples:**
 
 ```
-feat(delivery): add machine wake status endpoint
+feat(proxy): add wake coordinator debounce to prevent wake flooding
 
-Add GET /api/v1/machines/:id/status endpoint to check
-if a machine is currently online.
-
-Implements health check via ICMP ping to broadcast address.
-Includes request correlation and structured logging.
+Adds configurable debounce interval to WakeCoordinator to prevent
+sending multiple WoL commands in rapid succession when many requests
+arrive while a server is sleeping.
 
 Closes #42
 ```
 
 ```
-fix(usecase): handle nil machine in WoL packet sender
+fix(health): handle nil auth token in server health checker
 
-Prevent panic when machine pointer is nil by adding
-explicit nil check before accessing MAC address.
+Prevent panic when ServerHealthCheck.AuthToken is unset by checking
+Value() before setting the Authorization header.
 
 Fixes #35
 ```
 
 ```
-test(domain): add comprehensive Machine validation tests
+test(config): add table-driven tests for YAML substitution
 
-Use table-driven tests to cover all validation scenarios:
-- Valid machines
-- Boundary conditions
+Use table-driven tests to cover all env var substitution scenarios:
+- Present variable
+- Missing variable (passthrough)
+- Nested braces
 
-Achieves 100% coverage for Machine.Validate() method
-```
-
-```
-refactor(infrastructure): extract WoL packet builder to separate function
-
-Extract WoL magic packet construction into BuildMagicPacket function
-for reusability and testability. No behavior change.
+Achieves 100% coverage for substitute.go
 ```
 
 ### Pre-Commit Workflow
@@ -481,8 +462,8 @@ for reusability and testability. No behavior change.
 just test
 
 # Run specific package tests
-go test ./internal/domain
-go test ./internal/usecase -v
+go test ./internal/proxy/...
+go test ./internal/health/... -v
 
 # Run with race detector
 go test -race ./...
@@ -511,171 +492,221 @@ just build
 just docker-build latest
 
 # Run locally
-export SMAUG_CONFIG=configs/services.yaml
+export SMAUG_CONFIG=config/smaug.example.yaml
 just run
 ```
 
 ## Common Tasks
 
-### Adding a New Machine Attribute
+### Adding a New Route Field
 
-1. Update `Machine` struct in `internal/model/machine.go`
-2. Add validation logic in `Validate()` method
-3. Update `services.yaml` schema and example
-4. Add tests in `machine_test.go`
-5. Update store to parse new field
-6. Ensure 85%+ test coverage
+1. Update the `Route` struct in `internal/config/types.go`
+2. Add validation logic in `internal/config/validation.go`
+3. Update `config/smaug.example.yaml` schema and example
+4. Add tests in `internal/config/`
+5. Update route handling in `internal/proxy/route_manager.go`
+6. Ensure 90%+ test coverage
 
-### Adding a New HTTP Endpoint
+### Adding a New Management Endpoint
 
-1. Define handler method in `internal/handler/handler.go`
-2. Register route in main router setup
-3. Add authentication middleware if needed
-4. Create tests in `handler_test.go`
+1. Define the handler function in `internal/management/health/handlers.go`
+2. Register the route in `internal/management/health/server.go`
+3. Add response types to `internal/management/health/types.go`
+4. Create tests in `internal/management/health/`
 5. Document endpoint in README.md
-6. Add Prometheus metrics if applicable
-7. Ensure 90%+ test coverage
+6. Ensure 90%+ test coverage
 
-### Adding a New Service Method
+### Adding a New Metric
 
-1. Define method in `internal/service/` (e.g., `service/router.go`)
-2. Add structured logging
-3. Record metrics for important operations
-4. Handle errors appropriately
-5. Create comprehensive tests
-6. Ensure 95%+ test coverage
+1. Add the metric field to the appropriate metrics struct in `internal/infrastructure/metrics/`
+2. Register the metric in the corresponding `New*Metrics` constructor
+3. Add a public `Record*` method following the existing pattern
+4. Call the record method at the appropriate location in the codebase
+5. Update the metrics list in README.md
+6. Add tests in `internal/infrastructure/metrics/`
 
 ### Adding a New Domain Error
 
-1. Define error in `internal/model/errors.go`
-2. Use in appropriate layers
-3. Map to HTTP status code in handler layer
-4. Add tests for error handling
-5. Document in code comments
+1. Define the error variable in the package where it is used (e.g., `internal/proxy/wake_coordinator.go`)
+2. Return it (wrapped with `%w`) from the relevant functions
+3. Add tests for the error handling path
+4. Document in code comments
 
 ## Important Files
 
 ### Entry Point
-- `cmd/smaug/main.go` - Application bootstrap, dependency injection setup
+- `cmd/smaug/main.go` - Application bootstrap and dependency wiring
+- `cmd/smaug/version.go` - Version constants (updated by release process)
 
 ### Configuration
-- `configs/services.yaml` - Services and routes configuration
-- `internal/config/config.go` - Configuration loading and parsing
+- `config/smaug.example.yaml` - Example configuration file
+- `internal/config/types.go` - Configuration struct definitions
+- `internal/config/loader.go` - YAML loading and env var substitution
+- `internal/config/manager.go` - Config manager with hot-reload support
+- `internal/config/validation.go` - Configuration validation rules
 
-### Models & Types
-- `internal/model/machine.go` - Machine entity
-- `internal/model/route.go` - Route entity
-- `internal/model/errors.go` - Domain-specific errors
+### Proxy Core
+- `internal/proxy/proxy.go` - Reverse proxy handler
+- `internal/proxy/route_manager.go` - Per-port listener lifecycle management
+- `internal/proxy/wake_coordinator.go` - Wake-on-LAN coordination middleware
+- `internal/proxy/sleep_coordinator.go` - Sleep-on-LAN coordination
+- `internal/proxy/idle_tracker.go` - Idle detection and sleep triggers
+- `internal/proxy/reload.go` - Config hot-reload diff logic
 
-### HTTP Layer
-- `internal/handler/handler.go` - Request handlers and routes
-- `internal/handler/proxy.go` - Reverse proxy handler
-- `internal/middleware/middleware.go` - Logging, auth, correlation
-- `internal/middleware/auth.go` - API key authentication
+### Health
+- `internal/health/manager.go` - Coordinates health check workers for all servers
+- `internal/health/health.go` - HTTP health checker implementation
+- `internal/health/server_health_checker.go` - Per-server health check with store updates
+- `internal/store/health_store.go` - In-memory health status store
 
-### Business Logic
-- `internal/service/wol.go` - WoL packet sending logic
-- `internal/service/router.go` - Request routing and proxying logic
-- `internal/service/health.go` - Health check logic
+### Middleware
+- `internal/middleware/logging.go` - Structured request logging middleware
+- `internal/middleware/recovery.go` - Panic recovery middleware
+- `internal/middleware/metrics.go` - Request metrics middleware
 
-### Data Access
-- `internal/store/config.go` - Configuration loading from YAML
+### Infrastructure
+- `internal/infrastructure/logger/logger.go` - Structured logger wrapper around `log/slog`
+- `internal/infrastructure/metrics/metrics.go` - Prometheus registry and metric group wiring
+- `internal/infrastructure/metrics/power.go` - WoL/sleep/health metrics
+- `internal/infrastructure/metrics/request.go` - HTTP request metrics
+- `internal/infrastructure/metrics/gwaihir.go` - Gwaihir API call metrics
+- `internal/infrastructure/metrics/config.go` - Config reload metrics
 
-### Utilities
-- `internal/util/logger.go` - Structured logging
-- `internal/util/metrics.go` - Prometheus metrics
+### Management Servers
+- `internal/management/health/server.go` - Management HTTP server (port 2111 by default)
+- `internal/management/health/handlers.go` - `/health`, `/live`, `/ready`, `/version` handlers
+- `internal/management/metrics/server.go` - Prometheus metrics HTTP server (port 2112 by default)
+
+### External Clients
+- `internal/client/gwaihir/client.go` - Gwaihir WoL API client with retry
+- `internal/client/sleep/client.go` - Sleep endpoint client
 
 ## Configuration
 
-Smaug uses a unified YAML configuration file (services.yaml) that includes all settings: server, routing, wake-on-LAN, and observability.
+Smaug uses a unified YAML configuration file (`services.yaml` by default) that covers global settings, server power management, and route definitions.
 
 ### Configuration File Format
 
 ```yaml
-server:
-  port: 8080
-  log:
-    format: json          # json or text
-    level: info           # debug, info, warn, error
+# Global settings
+settings:
+  logging:
+    level: info    # debug, info, warn, error
+    format: json   # json or text
 
-authentication:
-  api_key: "secret-key"  # Optional: leave empty for public endpoints
+  gwaihir:
+    url: "http://gwaihir-service.ai.svc.cluster.local"
+    apiKey: "${GWAIHIR_API_KEY}"  # Env var substitution
+    timeout: 5s
 
+  observability:
+    healthCheck:
+      enabled: true   # Exposes /health, /live, /ready, /version
+      port: 2111
+    metrics:
+      enabled: true   # Exposes /metrics (Prometheus format)
+      port: 2112
+
+# Server definitions (keyed by server name)
+servers:
+  saruman:
+    wakeOnLan:
+      enabled: true
+      machineId: "saruman"         # Gwaihir machine ID
+      timeout: 60s
+      debounce: 5s                 # Min interval between WoL attempts
+
+    sleepOnLan:
+      enabled: true
+      endpoint: "http://saruman.from-gondor.com:8000/sleep"
+      authToken: "${SLEEP_ON_LAN_TOKEN}"  # Env var substitution
+      idleTimeout: 5m              # Sleep after 5 min idle
+
+    healthCheck:
+      endpoint: "http://saruman.from-gondor.com:8000/status"
+      authToken: "${HEALTH_CHECK_TOKEN}"  # Optional: base64-encoded user:password for Basic Auth
+      interval: 2s
+      timeout: 2s
+
+# Route definitions (port-per-service)
 routes:
-  - path: /service-name
-    target: "http://192.168.1.100:8080"
-    machine_id: "gandalf"  # Wake this machine on request (optional)
+  - name: ollama
+    listen: 11434
+    upstream: "http://saruman.from-gondor.com:11434"
+    server: saruman
 
-machines:
-  - id: gandalf                 # Required: unique identifier
-    name: "Gandalf Server"      # Required: human-readable name
-
-observability:
-  health_check:
-    enabled: true             # Enable /health, /live, /ready endpoints
-  metrics:
-    enabled: true             # Enable /metrics endpoint
+  - name: marker
+    listen: 8080
+    upstream: "http://saruman.from-gondor.com:8080"
+    server: saruman
 ```
 
-### Environment Variable Overrides
-
-Environment variables override configuration file values:
+### Environment Variables
 
 ```bash
 SMAUG_CONFIG=/etc/smaug/services.yaml   # Config file path (default: /etc/smaug/services.yaml)
-SMAUG_PORT=8080                         # Overrides server.port
-SMAUG_LOG_FORMAT=json                   # Overrides server.log.format (json|text)
-SMAUG_LOG_LEVEL=info                    # Overrides server.log.level (debug|info|warn|error)
-SMAUG_API_KEY=secret-key                # Overrides authentication.api_key
+SMAUG_LOG_LEVEL=info                    # Log level (debug|info|warn|error); default: info
+SMAUG_LOG_FORMAT=json                   # Log format (json|text); default: json
 ```
+
+Any YAML value in the format `${ENV_VAR_NAME}` is substituted with the corresponding environment variable at load time. This is the supported mechanism for injecting secrets such as `GWAIHIR_API_KEY` into the configuration.
 
 ## Security Considerations
 
-### API Key Authentication
+### Secret Handling
 
-- Set `SMAUG_API_KEY` to enable authentication
-- All WoL/machine endpoints require `X-API-Key` header
-- Health/metrics endpoints are always public
-- Never log API keys
+- All sensitive config values (`apiKey`, `authToken`) use the `SecretString` type
+- `SecretString` redacts its value in logs, JSON/text marshalling, and `fmt.Stringer` output
+- Never access the raw value with `.Value()` except when making outbound API calls
+- Never log API keys, auth tokens, or other secrets
 
 ### Allowlist-Based Access
 
-- Only machines in `services.yaml` can receive WoL packets
-- No dynamic machine registration
-- Validate all inputs
-- Use domain validation methods
+- Only servers defined in the configuration can receive WoL commands
+- No dynamic server registration at runtime
+- Validate all inputs at the config load and service layers
+- Use config validation methods before applying any configuration
 
 ### Network Security
 
 - Runs with `hostNetwork: true` in Kubernetes (required for broadcast)
 - Should be protected by NetworkPolicy
-- Only accessible from trusted services (e.g., Smaug itself)
+- Management ports (2111, 2112) should only be accessible from trusted services
 
 ## Observability
 
 ### Structured Logging
 
-All logs include:
-- `request_id`: Correlation ID for request tracing
-- `machine_id`: Target machine identifier
-- `operation`: Operation being performed
-- Appropriate log level (INFO, WARN, ERROR)
+All log entries include structured key-value pairs. Common keys:
+
+- `operation` - The operation being performed (e.g., `"init_idle_tracker"`)
+- `server_id` - Target server identifier
+- `machine_id` - Gwaihir machine identifier
+- `route` - Route name
+- `error` - Error value (when applicable)
 
 ### Prometheus Metrics
 
-Key metrics:
-- `smaug_wol_packets_sent_total` - Successful WoL packets
-- `smaug_wol_packets_failed_total` - Failed WoL packets
-- `smaug_machine_not_found_total` - Machine not found errors
-- `smaug_request_duration_seconds` - Request latency histogram
-- `smaug_configured_machines_total` - Number of configured machines
+Key metrics registered in `internal/infrastructure/metrics/`:
+
+- `smaug_wake_attempts_total{server, success}` - WoL wake attempts
+- `smaug_server_awake{server}` - Server state gauge (1=awake, 0=sleeping)
+- `smaug_health_check_failures_total{server, reason}` - Health check failures
+- `smaug_sleep_triggered_total{server}` - Servers put to sleep
+- `smaug_request_duration_seconds` - HTTP request latency histogram
+- `smaug_requests_total` - Total HTTP requests
+- `smaug_requests_by_status_total{status}` - Requests by HTTP status code
+- `smaug_requests_by_method_total{method}` - Requests by HTTP method
+- `smaug_config_reload_total{success}` - Config reload attempts
+- `smaug_gwaihir_api_calls_total{operation, success}` - Gwaihir API calls
+- `smaug_gwaihir_api_duration_seconds{operation, success}` - Gwaihir API latency
 
 ## Troubleshooting
 
 ### Tests Failing
 
 1. Check test coverage: `just test`
-2. Run specific failing test: `go test ./path -run TestName -v`
+2. Run specific failing test: `go test ./path/... -run TestName -v`
 3. Check for race conditions: `go test -race ./...`
 4. Verify mocks are properly configured
 
@@ -688,7 +719,7 @@ Key metrics:
 
 ### Build Issues
 
-1. Verify Go version: `go version` (need 1.23+)
+1. Verify Go version: `go version` (need 1.26+)
 2. Clean build cache: `go clean -cache`
 3. Update dependencies: `go mod tidy`
 4. Check for missing dependencies: `go mod verify`
@@ -737,11 +768,11 @@ Key metrics:
 ## Best Practices
 
 ### DO:
-- Keep dependencies flowing in one direction (handler → service → store)
+- Keep dependencies flowing in one direction (proxy → health/config/store → infrastructure)
 - Write tests BEFORE implementation (TDD)
 - Use structured logging with context
 - Record metrics for important operations
-- Validate inputs at model/service layer
+- Validate inputs at the config layer
 - Use domain-specific errors
 - Keep functions small and focused
 - Document exported functions and types
@@ -779,7 +810,7 @@ Smaug uses SNAPSHOT-based versioning:
 
 - [README.md](README.md) - User-facing documentation
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
-- [2026-02-08-service-architecture.md](docs/adrs/2026-02-08-service-architecture.md) - Architecture details
+- [ADR-001: Foundation Architecture](docs/adrs/ADR-001-foundation.md) - Architecture details
 
 ## Quick Reference
 
@@ -794,7 +825,7 @@ just pre-commit
 just test
 
 # Run locally
-export SMAUG_CONFIG=configs/services.yaml
+export SMAUG_CONFIG=config/smaug.example.yaml
 just run
 
 # Build

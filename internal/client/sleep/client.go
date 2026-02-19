@@ -36,6 +36,7 @@ const (
 // Client is a REST client for sending sleep commands to a remote endpoint.
 type Client struct {
 	endpoint   string
+	authToken  string // pre-encoded Basic Auth token; empty means no auth
 	httpClient *http.Client
 	logger     *logger.Logger
 }
@@ -60,7 +61,8 @@ func NewClient(config ClientConfig, log *logger.Logger) (*Client, error) {
 	}
 
 	return &Client{
-		endpoint: config.Endpoint,
+		endpoint:  config.Endpoint,
+		authToken: config.AuthToken,
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
@@ -133,6 +135,10 @@ func (c *Client) Sleep(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf(errMsgCreateRequest, ErrNetworkError, c.endpoint, err)
+	}
+
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Basic "+c.authToken)
 	}
 
 	resp, err := c.httpClient.Do(req)

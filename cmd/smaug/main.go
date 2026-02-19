@@ -169,6 +169,7 @@ func initSleepCoordinator(cfg *config.Config, idleTracker *proxy.IdleTracker, lo
 		}
 
 		clientCfg := sleepclient.NewClientConfig(server.SleepOnLan.Endpoint)
+		clientCfg.AuthToken = server.SleepOnLan.AuthToken.Value()
 		client, err := sleepclient.NewClient(clientCfg, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create sleep client for route %q (server %q): %w",

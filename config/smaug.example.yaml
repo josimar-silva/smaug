@@ -37,7 +37,7 @@ servers:
     sleepOnLan: # Sleep on LAN configuration
       enabled: true
       endpoint: "http://saruman.from-gondor.com:8000/sleep"
-      authToken: "${SLEEP_ON_LAN_TOKEN}"  # Env var substitution
+      authToken: "${SLEEP_ON_LAN_TOKEN}"  # Optional: base64-encoded user:password for Basic Auth (echo -n "user:password" | base64)
       idleTimeout: 5m  # Sleep after 5 min idle
     
     healthCheck:

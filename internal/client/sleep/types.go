@@ -18,8 +18,9 @@ type Sleeper interface {
 
 // ClientConfig defines the configuration for the sleep REST client.
 type ClientConfig struct {
-	Endpoint string        // Full URL of the sleep endpoint (e.g., "http://homeserver.local/sleep")
-	Timeout  time.Duration // HTTP request timeout; use defaultTimeout (10s) as a sensible value
+	Endpoint  string        // Full URL of the sleep endpoint (e.g., "http://homeserver.local/sleep")
+	Timeout   time.Duration // HTTP request timeout; use defaultTimeout (10s) as a sensible value
+	AuthToken string        // Optional: pre-encoded Basic Auth token (base64 of "user:password") sent as Authorization: Basic <token>
 }
 
 // NewClientConfig returns a ClientConfig pre-populated with a sensible default timeout (10 s).

@@ -31,6 +31,17 @@ func newBehaviorTestClient(t *testing.T, serverURL string) *Client {
 	}
 }
 
+// newBehaviorTestClientWithAuth is like newBehaviorTestClient but also sets an auth token.
+func newBehaviorTestClientWithAuth(t *testing.T, serverURL, authToken string) *Client {
+	t.Helper()
+	return &Client{
+		endpoint:   serverURL,
+		authToken:  authToken,
+		httpClient: &http.Client{Timeout: defaultTimeout},
+		logger:     newTestLogger(),
+	}
+}
+
 // --- NewClient construction tests ---
 
 // TestNewClientSuccess verifies that a valid config creates a client without error.
@@ -312,4 +323,67 @@ func TestClientSleepUsesGetMethod(t *testing.T) {
 
 	// Then: the request must use GET
 	assert.Equal(t, http.MethodGet, receivedMethod)
+}
+
+// TestClientSleepSendsAuthorizationHeaderWhenTokenSet verifies that Sleep sets
+// the Authorization: Basic header when an auth token is configured.
+func TestClientSleepSendsAuthorizationHeaderWhenTokenSet(t *testing.T) {
+	// Given: a server that captures the Authorization header
+	const token = "dXNlcjpwYXNzd29yZA==" //nolint:gosec // test-only dummy credential
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := newBehaviorTestClientWithAuth(t, server.URL, token)
+
+	// When: sending a sleep command
+	err := client.Sleep(context.Background())
+
+	// Then: Authorization header is set with the correct Basic token
+	assert.NoError(t, err)
+	assert.Equal(t, "Basic "+token, receivedAuth)
+}
+
+// TestClientSleepOmitsAuthorizationHeaderWhenTokenEmpty verifies that Sleep does
+// not set an Authorization header when no auth token is configured.
+func TestClientSleepOmitsAuthorizationHeaderWhenTokenEmpty(t *testing.T) {
+	// Given: a server that captures the Authorization header
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := newBehaviorTestClient(t, server.URL) // no auth token
+
+	// When: sending a sleep command
+	err := client.Sleep(context.Background())
+
+	// Then: no Authorization header is sent
+	assert.NoError(t, err)
+	assert.Empty(t, receivedAuth)
+}
+
+// TestNewClientConfigAuthTokenIsStoredInClient verifies that AuthToken in ClientConfig
+// is propagated to the constructed Client.
+func TestNewClientConfigAuthTokenIsStoredInClient(t *testing.T) {
+	// Given: a valid config with an auth token
+	const token = "dXNlcjpwYXNzd29yZA==" //nolint:gosec // test-only dummy credential
+	config := ClientConfig{
+		Endpoint:  "http://homeserver.local/sleep",
+		Timeout:   defaultTimeout,
+		AuthToken: token,
+	}
+
+	// When: creating the client
+	client, err := NewClient(config, newTestLogger())
+
+	// Then: the client is created and stores the auth token
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.Equal(t, token, client.authToken)
 }

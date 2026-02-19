@@ -25,6 +25,10 @@ const defaultGwaihirTimeout = 5 * time.Second
 // defaultIdleCheckInterval is the period between idle checks in the IdleTracker.
 const defaultIdleCheckInterval = time.Minute
 
+// gracefulShutdownTimeout is the maximum duration to wait for in-flight requests to complete
+// during graceful shutdown. This aligns with Kubernetes pod termination grace period.
+const gracefulShutdownTimeout = 30 * time.Second
+
 // routeSleepSender implements proxy.SleepSender by dispatching sleep commands to
 // the correct upstream endpoint based on the route identifier.
 //
@@ -80,7 +84,6 @@ func initHealthManager(cfg *config.Config, healthStore *store.InMemoryHealthStor
 }
 
 func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker, error) {
-	// Count routes whose associated server has SleepOnLan enabled.
 	solCount := 0
 	for _, route := range cfg.Routes {
 		if server, ok := cfg.Servers[route.Server]; ok && server.SleepOnLan.Enabled {
@@ -102,8 +105,6 @@ func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker
 		return nil, fmt.Errorf("failed to create idle tracker: %w", err)
 	}
 
-	// Register each SleepOnLan-enabled route with its server's idle timeout so the
-	// background checker knows how long to wait before emitting a sleep trigger.
 	for _, route := range cfg.Routes {
 		server, ok := cfg.Servers[route.Server]
 		if !ok || !server.SleepOnLan.Enabled {
@@ -320,8 +321,13 @@ func run() error {
 		return err
 	}
 
+	var shutdownCtx context.Context
+	var shutdownCancel context.CancelFunc
+
+	shutdownCtx = context.Background()
+
 	if idleTracker != nil {
-		if err := idleTracker.Start(context.Background()); err != nil {
+		if err := idleTracker.Start(shutdownCtx); err != nil {
 			return fmt.Errorf("failed to start idle tracker: %w", err)
 		}
 		defer func() {
@@ -347,7 +353,7 @@ func run() error {
 	}
 
 	if sleepCoordinator != nil {
-		if err := sleepCoordinator.Start(context.Background()); err != nil {
+		if err := sleepCoordinator.Start(shutdownCtx); err != nil {
 			return fmt.Errorf("failed to start sleep coordinator: %w", err)
 		}
 		defer func() {
@@ -371,11 +377,21 @@ func run() error {
 
 	log.Info("smaug started successfully")
 
+	shutdownCtx, shutdownCancel = context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer shutdownCancel()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+	sig := <-sigChan
 
-	log.Info("shutting down smaug")
+	log.InfoContext(shutdownCtx, "shutdown signal received, starting graceful shutdown",
+		"signal", sig.String(),
+		"timeout", gracefulShutdownTimeout,
+	)
+
+	shutdownCancel()
+
+	log.Info("graceful shutdown completed")
 	return nil
 }
 

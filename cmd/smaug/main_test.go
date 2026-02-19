@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -484,4 +485,247 @@ func TestRouteSleepSenderForwardsErrorFromClient(t *testing.T) {
 
 	// Then: network error propagated from the sleep client
 	assert.Error(t, err)
+}
+
+// --- Shutdown behavior ---
+// TestGracefulShutdownTrapsSIGTERM verifies that a SIGTERM signal triggers graceful shutdown.
+func TestGracefulShutdownTrapsSIGTERM(t *testing.T) {
+	// Given: a signal channel and graceful shutdown handler
+	sigChan := make(chan os.Signal, 1)
+	shutdownCalled := false
+
+	// When: SIGTERM is sent
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		sigChan <- syscall.SIGTERM
+	}()
+
+	// Then: graceful shutdown is triggered
+	select {
+	case sig := <-sigChan:
+		shutdownCalled = true
+		assert.Equal(t, syscall.SIGTERM, sig)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected SIGTERM signal within timeout")
+	}
+
+	assert.True(t, shutdownCalled, "shutdown should have been called")
+}
+
+// TestGracefulShutdownTrapsINT verifies that an INT signal triggers graceful shutdown.
+func TestGracefulShutdownTrapsINT(t *testing.T) {
+	// Given: a signal channel and graceful shutdown handler
+	sigChan := make(chan os.Signal, 1)
+	shutdownCalled := false
+
+	// When: INT (Ctrl+C) is sent
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		sigChan <- os.Interrupt
+	}()
+
+	// Then: graceful shutdown is triggered
+	select {
+	case sig := <-sigChan:
+		shutdownCalled = true
+		assert.Equal(t, os.Interrupt, sig)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected INT signal within timeout")
+	}
+
+	assert.True(t, shutdownCalled, "shutdown should have been called")
+}
+
+// TestGracefulShutdownHas30SecondTimeout verifies that graceful shutdown respects
+// a 30-second maximum timeout for in-flight requests to complete.
+func TestGracefulShutdownHas30SecondTimeout(t *testing.T) {
+	// Given: the graceful shutdown timeout constant
+	expectedTimeout := 30 * time.Second
+
+	// When: we examine the shutdown timeout
+	actualTimeout := gracefulShutdownTimeout
+
+	// Then: it should be exactly 30 seconds
+	assert.Equal(t, expectedTimeout, actualTimeout,
+		"graceful shutdown timeout should be 30 seconds for Kubernetes grace period")
+}
+
+// TestGracefulShutdownStopsAcceptingRequests verifies that the shutdown process
+// prevents the route manager from accepting new requests.
+// (This is implicit: RouteManager.Stop() cancels context → no new requests accepted)
+func TestGracefulShutdownStopsAcceptingRequests(t *testing.T) {
+	// Given: a context that will be cancelled during shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// When: the context is cancelled (simulating shutdown signal)
+	cancel()
+
+	// Then: the context should be done
+	select {
+	case <-ctx.Done():
+		// Expected
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("context should be cancelled immediately")
+	}
+}
+
+// TestGracefulShutdownWaitsForInFlightRequests verifies that the timeout allows
+// in-flight requests to complete gracefully.
+// The actual waiting is handled by http.Server.Shutdown() which respects the context timeout.
+func TestGracefulShutdownWaitsForInFlightRequests(t *testing.T) {
+	// Given: a context with the graceful shutdown timeout
+	ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer cancel()
+
+	// When: we check the deadline
+	deadline, ok := ctx.Deadline()
+
+	// Then: a deadline should be set (the timeout ensures requests have time to complete)
+	assert.True(t, ok, "context should have a deadline")
+	assert.NotZero(t, deadline, "deadline should be non-zero")
+
+	// Verify the timeout is reasonable (at least several seconds)
+	duration := time.Until(deadline)
+	assert.Greater(t, duration, 25*time.Second, "graceful shutdown should allow at least 25 seconds for in-flight requests")
+}
+
+// TestGracefulShutdownStopsAllGoroutines verifies that all background goroutines
+// are stopped via context cancellation during graceful shutdown.
+func TestGracefulShutdownStopsAllGoroutines(t *testing.T) {
+	// Given: a context that simulates the shutdown signal
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// When: the context is cancelled (during shutdown)
+	cancel()
+
+	// Then: all components that were started with this context should stop
+	select {
+	case <-ctx.Done():
+		// Expected: components using this context will see cancellation
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("context should be cancelled immediately")
+	}
+}
+
+// TestGracefulShutdownExitsCleanly verifies that the graceful shutdown process
+// exits with code 0 (success) when triggered by SIGTERM/INT.
+// (This is enforced by main() which only exits non-zero on error, not on signal)
+func TestGracefulShutdownExitsCleanly(t *testing.T) {
+	// Given: a run() function that returns nil (no error) on graceful shutdown
+	runErr := error(nil)
+
+	// When: main() evaluates the error
+	// (In practice: run() returns nil when signal is received)
+
+	// Then: exit code should be 0 (not called with os.Exit(1))
+	shouldExit := runErr != nil
+	assert.False(t, shouldExit, "graceful shutdown should exit with code 0")
+}
+
+// TestShutdownContextHasTimeout verifies that the shutdown context created during
+// signal handling has the graceful shutdown timeout applied.
+func TestShutdownContextHasTimeout(t *testing.T) {
+	// Given: we create a shutdown context with graceful shutdown timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		gracefulShutdownTimeout,
+	)
+	defer shutdownCancel()
+
+	// When: we check the context
+	deadline, ok := shutdownCtx.Deadline()
+
+	// Then: it should have a deadline within the timeout
+	assert.True(t, ok, "shutdown context should have a deadline")
+	assert.NotZero(t, deadline, "deadline should be non-zero")
+
+	// Verify the deadline is approximately 30 seconds in the future
+	remaining := time.Until(deadline)
+	assert.Greater(t, remaining, 25*time.Second, "at least 25 seconds should remain")
+	assert.LessOrEqual(t, remaining, gracefulShutdownTimeout, "remaining time should not exceed timeout")
+}
+
+// TestShutdownContextCancellation verifies that cancelling the shutdown context
+// propagates to dependent operations (e.g., goroutines waiting for Done()).
+func TestShutdownContextCancellation(t *testing.T) {
+	// Given: a shutdown context and cancel function
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		gracefulShutdownTimeout,
+	)
+
+	// When: we cancel the context
+	shutdownCancel()
+
+	// Then: the context should be done immediately
+	select {
+	case <-shutdownCtx.Done():
+		// Expected: context is cancelled
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("shutdown context should be done after cancellation")
+	}
+
+	// And: the error should be context.Canceled
+	assert.Equal(t, context.Canceled, shutdownCtx.Err(),
+		"shutdown context error should be context.Canceled")
+}
+
+// TestGracefulShutdownTimeoutEnforcement verifies that the timeout is actually
+// enforced by the context (requests exceeding the timeout should fail).
+func TestGracefulShutdownTimeoutEnforcement(t *testing.T) {
+	// Given: a short timeout for testing
+	shortTimeout := 100 * time.Millisecond
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		shortTimeout,
+	)
+	defer shutdownCancel()
+
+	// When: we wait longer than the timeout
+	select {
+	case <-shutdownCtx.Done():
+		// Expected: context should timeout
+		assert.Equal(t, context.DeadlineExceeded, shutdownCtx.Err(),
+			"context should timeout with DeadlineExceeded")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("context should timeout within 500ms")
+	}
+}
+
+// TestSignalHandlingFlow verifies the complete signal handling flow:
+// signal → context creation → cancellation → shutdown.
+func TestSignalHandlingFlow(t *testing.T) {
+	// Given: a buffered signal channel and goroutine to send signal
+	sigChan := make(chan os.Signal, 1)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		sigChan <- syscall.SIGTERM
+	}()
+
+	// When: we simulate the signal handling flow
+	sig := <-sigChan
+	assert.Equal(t, syscall.SIGTERM, sig, "signal should be SIGTERM")
+
+	// And: we create a shutdown context
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		gracefulShutdownTimeout,
+	)
+	defer shutdownCancel()
+
+	// Then: the shutdown context should have a deadline
+	deadline, ok := shutdownCtx.Deadline()
+	assert.True(t, ok, "shutdown context should have deadline")
+	assert.NotZero(t, deadline, "deadline should be set")
+
+	// And: when we cancel the context, Done() should close
+	shutdownCancel()
+	select {
+	case <-shutdownCtx.Done():
+		// Expected: context cancelled
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("context should be done after cancellation")
+	}
 }

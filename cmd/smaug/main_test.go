@@ -15,6 +15,7 @@ import (
 	sleepclient "github.com/josimar-silva/smaug/internal/client/sleep"
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
+	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 	"github.com/josimar-silva/smaug/internal/proxy"
 )
 
@@ -24,6 +25,14 @@ func newTestLogger(t *testing.T) *logger.Logger {
 	log := logger.New(logger.LevelInfo, logger.TEXT, nil)
 	t.Cleanup(func() { _ = log.Stop() })
 	return log
+}
+
+// newTestMetrics returns a test metrics registry.
+func newTestMetrics(t *testing.T) *metrics.Registry {
+	t.Helper()
+	m, err := metrics.New()
+	require.NoError(t, err)
+	return m
 }
 
 // configWithGwaihir builds a *config.Config with the given Gwaihir URL and API key via
@@ -155,10 +164,11 @@ func TestStartManagementServerSetsVersionInfo(t *testing.T) {
 func TestInitWakeOptionsGwaihirURLNotConfigured(t *testing.T) {
 	// Given: No Gwaihir URL in config
 	cfg := &config.Config{}
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	opts, err := initWakeOptions(cfg, log)
+	opts, err := initWakeOptions(cfg, m, log)
 
 	// Then: WoL coordination is disabled; no error
 	assert.NoError(t, err)
@@ -168,10 +178,11 @@ func TestInitWakeOptionsGwaihirURLNotConfigured(t *testing.T) {
 func TestInitWakeOptionsEmptyAPIKey(t *testing.T) {
 	// Given: Gwaihir URL set, API key empty, one WoL-enabled server so we reach NewClient
 	cfg := configWithWoLServer(t, "http://gwaihir.example.com", "", "homeserver")
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	opts, err := initWakeOptions(cfg, log)
+	opts, err := initWakeOptions(cfg, m, log)
 
 	// Then: gwaihir client construction fails due to missing API key
 	assert.Error(t, err)
@@ -182,10 +193,11 @@ func TestInitWakeOptionsEmptyAPIKey(t *testing.T) {
 func TestInitWakeOptionsNoWoLEnabledServers(t *testing.T) {
 	// Given: Valid Gwaihir config but no servers with WoL enabled
 	cfg := configWithGwaihir(t, "http://gwaihir.example.com", "secret-key")
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	opts, err := initWakeOptions(cfg, log)
+	opts, err := initWakeOptions(cfg, m, log)
 
 	// Then: WoL coordination is disabled (no pollers); no error
 	assert.NoError(t, err)
@@ -195,10 +207,11 @@ func TestInitWakeOptionsNoWoLEnabledServers(t *testing.T) {
 func TestInitWakeOptionsWithWoLEnabledServer(t *testing.T) {
 	// Given: Valid Gwaihir config and one WoL-enabled server
 	cfg := configWithWoLServer(t, "http://gwaihir.example.com", "secret-key", "homeserver")
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	opts, err := initWakeOptions(cfg, log)
+	opts, err := initWakeOptions(cfg, m, log)
 
 	// Then: WakeOptions returned with a Sender
 	assert.NoError(t, err)
@@ -210,16 +223,17 @@ func TestInitWakeOptionsDefaultTimeout(t *testing.T) {
 	// Given: Gwaihir config with zero timeout (should fall back to defaultGwaihirTimeout)
 	raw := `
 settings:
-  gwaihir:
+   gwaihir:
     url: "http://gwaihir.example.com"
     apiKey: "secret-key"
 `
 	var cfg config.Config
 	require.NoError(t, yaml.Unmarshal([]byte(raw), &cfg))
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When: zero timeout — initWakeOptions must not fail with ErrInvalidTimeout
-	opts, err := initWakeOptions(&cfg, log)
+	opts, err := initWakeOptions(&cfg, m, log)
 
 	// Then: default timeout applied; no WoL-enabled servers so opts is nil, no error
 	assert.NoError(t, err)
@@ -239,10 +253,11 @@ func TestInitIdleTrackerNoSleepOnLanRoutes(t *testing.T) {
 			{Name: "route1", Server: "server1"},
 		},
 	}
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	tracker, err := initIdleTracker(cfg, log)
+	tracker, err := initIdleTracker(cfg, m, log)
 
 	// Then: idle tracker is disabled (nil), no error
 	assert.NoError(t, err)
@@ -265,10 +280,11 @@ func TestInitIdleTrackerWithSleepOnLanRoute(t *testing.T) {
 			{Name: "route1", Server: "server1"},
 		},
 	}
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	tracker, err := initIdleTracker(cfg, log)
+	tracker, err := initIdleTracker(cfg, m, log)
 
 	// Then: an idle tracker is returned with the route registered
 	require.NoError(t, err)
@@ -296,10 +312,11 @@ func TestInitIdleTrackerSkipsRouteWithNoMatchingServer(t *testing.T) {
 			{Name: "route-valid", Server: "server1"},
 		},
 	}
+	m := newTestMetrics(t)
 	log := newTestLogger(t)
 
 	// When
-	tracker, err := initIdleTracker(cfg, log)
+	tracker, err := initIdleTracker(cfg, m, log)
 
 	// Then: tracker created for the valid route only
 	require.NoError(t, err)

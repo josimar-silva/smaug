@@ -15,6 +15,7 @@ import (
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 	mgmhealth "github.com/josimar-silva/smaug/internal/management/health"
+	mgmmetrics "github.com/josimar-silva/smaug/internal/management/metrics"
 	"github.com/josimar-silva/smaug/internal/middleware"
 	"github.com/josimar-silva/smaug/internal/proxy"
 	"github.com/josimar-silva/smaug/internal/store"
@@ -77,23 +78,30 @@ func initMetrics(log *logger.Logger) (*metrics.Registry, error) {
 	return m, nil
 }
 
-func initConfigManager(configPath string, log *logger.Logger) (*config.ConfigManager, error) {
+func initConfigManager(configPath string, m *metrics.Registry, log *logger.Logger) (*config.ConfigManager, error) {
 	configMgr, err := config.NewManager(configPath, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config manager: %w", err)
 	}
+
+	if m != nil {
+		configMgr.SetMetrics(m)
+	}
+
 	return configMgr, nil
 }
 
-func initHealthManager(cfg *config.Config, healthStore *store.InMemoryHealthStore, log *logger.Logger) (*health.HealthManager, error) {
+func initHealthManager(cfg *config.Config, healthStore *store.InMemoryHealthStore, m *metrics.Registry, log *logger.Logger) (*health.HealthManager, error) {
 	healthManager := health.NewHealthManager(cfg, healthStore, log)
+	healthManager.SetMetrics(m)
+
 	if err := healthManager.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start health manager: %w", err)
 	}
 	return healthManager, nil
 }
 
-func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker, error) {
+func initIdleTracker(cfg *config.Config, m *metrics.Registry, log *logger.Logger) (*proxy.IdleTracker, error) {
 	solCount := 0
 	for _, route := range cfg.Routes {
 		if server, ok := cfg.Servers[route.Server]; ok && server.SleepOnLan.Enabled {
@@ -114,6 +122,8 @@ func initIdleTracker(cfg *config.Config, log *logger.Logger) (*proxy.IdleTracker
 	if err != nil {
 		return nil, fmt.Errorf("failed to create idle tracker: %w", err)
 	}
+
+	idleTracker.SetMetrics(m)
 
 	for _, route := range cfg.Routes {
 		server, ok := cfg.Servers[route.Server]
@@ -196,7 +206,7 @@ func initSleepCoordinator(cfg *config.Config, idleTracker *proxy.IdleTracker, lo
 	return coordinator, nil
 }
 
-func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, log *logger.Logger, wakeOpts *proxy.WakeOptions, idleTracker proxy.ActivityRecorder) (*proxy.RouteManager, error) {
+func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemoryHealthStore, m *metrics.Registry, log *logger.Logger, wakeOpts *proxy.WakeOptions, idleTracker proxy.ActivityRecorder) (*proxy.RouteManager, error) {
 	routeManager, err := proxy.NewRouteManager(configMgr, log, middleware.Chain(
 		middleware.NewRecoveryMiddleware(log),
 		middleware.NewLoggingMiddleware(log),
@@ -213,13 +223,15 @@ func initRouteManager(configMgr *config.ConfigManager, healthStore *store.InMemo
 		routeManager.SetIdleTracker(idleTracker)
 	}
 
+	routeManager.SetMetrics(m)
+
 	if err := routeManager.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start route manager: %w", err)
 	}
 	return routeManager, nil
 }
 
-func initWakeOptions(cfg *config.Config, log *logger.Logger) (*proxy.WakeOptions, error) {
+func initWakeOptions(cfg *config.Config, m *metrics.Registry, log *logger.Logger) (*proxy.WakeOptions, error) {
 	if cfg.Settings.Gwaihir.URL == "" {
 		log.Info("Gwaihir URL not configured; Wake-on-LAN coordination disabled")
 		return nil, nil
@@ -251,6 +263,8 @@ func initWakeOptions(cfg *config.Config, log *logger.Logger) (*proxy.WakeOptions
 		return nil, fmt.Errorf("failed to create Gwaihir client: %w", err)
 	}
 
+	wolClient.SetMetrics(m)
+
 	log.Info("Wake-on-LAN coordination enabled", "server_count", wolCount)
 
 	return &proxy.WakeOptions{Sender: wolClient}, nil
@@ -281,6 +295,24 @@ func startManagementServer(cfg *config.Config, routeStatusProvider mgmhealth.Rou
 	return managementServer, nil
 }
 
+func startMetricsServer(cfg *config.Config, metricsRegistry *metrics.Registry, log *logger.Logger) (*mgmmetrics.Server, error) {
+	metricsServer := mgmmetrics.NewServer(
+		cfg.Settings.Observability.Metrics.Port,
+		metricsRegistry,
+		log,
+	)
+
+	if err := metricsServer.Start(context.Background()); err != nil {
+		return nil, err
+	}
+
+	log.Info("metrics server started",
+		"port", cfg.Settings.Observability.Metrics.Port,
+	)
+
+	return metricsServer, nil
+}
+
 func run() error {
 	configPath := os.Getenv("SMAUG_CONFIG")
 	if configPath == "" {
@@ -294,7 +326,12 @@ func run() error {
 		}
 	}()
 
-	configMgr, err := initConfigManager(configPath, log)
+	m, err := initMetrics(log)
+	if err != nil {
+		return err
+	}
+
+	configMgr, err := initConfigManager(configPath, m, log)
 	if err != nil {
 		return err
 	}
@@ -309,15 +346,9 @@ func run() error {
 
 	log.Info("starting smaug", "config_path", configPath)
 
-	// Initialize metrics
-	m, err := initMetrics(log)
-	if err != nil {
-		return err
-	}
-
 	healthStore := store.NewInMemoryHealthStore()
 
-	healthManager, err := initHealthManager(cfg, healthStore, log)
+	healthManager, err := initHealthManager(cfg, healthStore, m, log)
 	if err != nil {
 		return err
 	}
@@ -327,29 +358,14 @@ func run() error {
 		}
 	}()
 
-	// Wire metrics into health manager
-	healthManager.SetMetrics(m)
-
-	wakeOpts, err := initWakeOptions(cfg, log)
+	wakeOpts, err := initWakeOptions(cfg, m, log)
 	if err != nil {
 		return err
 	}
 
-	// Wire metrics into Gwaihir client
-	if wakeOpts != nil && wakeOpts.Sender != nil {
-		if client, ok := wakeOpts.Sender.(*gwaihir.Client); ok {
-			client.SetMetrics(m)
-		}
-	}
-
-	idleTracker, err := initIdleTracker(cfg, log)
+	idleTracker, err := initIdleTracker(cfg, m, log)
 	if err != nil {
 		return err
-	}
-
-	// Wire metrics into idle tracker
-	if idleTracker != nil {
-		idleTracker.SetMetrics(m)
 	}
 
 	var shutdownCtx context.Context
@@ -368,7 +384,7 @@ func run() error {
 		}()
 	}
 
-	routeManager, err := initRouteManager(configMgr, healthStore, log, wakeOpts, idleTracker)
+	routeManager, err := initRouteManager(configMgr, healthStore, m, log, wakeOpts, idleTracker)
 	if err != nil {
 		return err
 	}
@@ -377,12 +393,6 @@ func run() error {
 			log.Error("failed to stop route manager", "error", err)
 		}
 	}()
-
-	// Wire metrics into route manager
-	routeManager.SetMetrics(m)
-
-	// Wire metrics into config manager
-	configMgr.SetMetrics(m)
 
 	sleepCoordinator, err := initSleepCoordinator(cfg, idleTracker, log)
 	if err != nil {
@@ -408,6 +418,18 @@ func run() error {
 		defer func() {
 			if err := managementServer.Stop(); err != nil {
 				log.Error("failed to stop management server", "error", err)
+			}
+		}()
+	}
+
+	if cfg.Settings.Observability.Metrics.Enabled {
+		metricsServer, err := startMetricsServer(cfg, m, log)
+		if err != nil {
+			return fmt.Errorf("failed to start metrics server: %w", err)
+		}
+		defer func() {
+			if err := metricsServer.Stop(); err != nil {
+				log.Error("failed to stop metrics server", "error", err)
 			}
 		}()
 	}

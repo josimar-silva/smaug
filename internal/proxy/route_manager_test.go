@@ -11,6 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/josimar-silva/smaug/internal/config"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/josimar-silva/smaug/internal/middleware"
@@ -1058,5 +1060,43 @@ func TestGetActiveRouteCountExcludesFailedRoutes(t *testing.T) {
 	// Then: Count should be 1 (only the working route)
 	if count != 1 {
 		t.Errorf("expected 1 active route (failed route should not count), got %d", count)
+	}
+}
+
+// --- IdleTracker integration tests ---
+
+// TestSetIdleTrackerStoresTracker verifies that SetIdleTracker populates the field.
+func TestSetIdleTrackerStoresTracker(t *testing.T) {
+	// Given: a RouteManager and a mock activity recorder
+	rm := buildTestRouteManager(t, &config.Config{})
+	tracker := &mockActivityRecorder{}
+
+	// When: SetIdleTracker is called
+	rm.SetIdleTracker(tracker)
+
+	// Then: the field is populated
+	if rm.idleTracker == nil {
+		t.Fatal("expected idleTracker to be set, got nil")
+	}
+}
+
+// TestSetIdleTrackerIgnoredAfterStart verifies that SetIdleTracker is a no-op if
+// called after Start, protecting against accidental misconfiguration.
+func TestSetIdleTrackerIgnoredAfterStart(t *testing.T) {
+	// Given: a started RouteManager
+	rm := buildTestRouteManager(t, &config.Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, rm.Start(ctx))
+	defer func() { _ = rm.Stop() }()
+
+	tracker := &mockActivityRecorder{}
+
+	// When: SetIdleTracker is called after Start
+	rm.SetIdleTracker(tracker)
+
+	// Then: the field remains nil (call is ignored)
+	if rm.idleTracker != nil {
+		t.Error("expected idleTracker to remain nil when set after Start")
 	}
 }

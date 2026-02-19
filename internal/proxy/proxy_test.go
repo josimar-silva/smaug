@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,33 @@ import (
 
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 )
+
+// mockActivityRecorder is a test double for ActivityRecorder that records all calls.
+type mockActivityRecorder struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (m *mockActivityRecorder) RecordActivity(routeID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, routeID)
+}
+
+func (m *mockActivityRecorder) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
+
+func (m *mockActivityRecorder) lastRouteID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.calls) == 0 {
+		return ""
+	}
+	return m.calls[len(m.calls)-1]
+}
 
 func newTestLogger() *logger.Logger {
 	return logger.New(logger.LevelInfo, logger.JSON, &bytes.Buffer{})
@@ -330,4 +358,138 @@ func TestProxyHandlerEmptyResponse(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, "", recorder.Body.String())
+}
+
+// --- ActivityRecorder integration tests ---
+
+// TestProxyHandlerWithActivityRecorderRecordsActivityOnSuccessfulRequest verifies that
+// RecordActivity is called with the correct routeID on every successful request.
+func TestProxyHandlerWithActivityRecorderRecordsActivityOnSuccessfulRequest(t *testing.T) {
+	// Given: a backend that returns 200 and a proxy with an ActivityRecorder
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	recorder := &mockActivityRecorder{}
+	proxy := NewProxyHandler(backend.URL, newTestLogger(), WithActivityRecorder(recorder, "my-route"))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+
+	// When: a request is served
+	proxy.ServeHTTP(w, r)
+
+	// Then: RecordActivity was called exactly once with the correct route ID
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, recorder.callCount())
+	assert.Equal(t, "my-route", recorder.lastRouteID())
+}
+
+// TestProxyHandlerWithActivityRecorderRecordsActivityOnBackendError verifies that
+// RecordActivity is called even when the backend is unreachable (502 Bad Gateway).
+func TestProxyHandlerWithActivityRecorderRecordsActivityOnBackendError(t *testing.T) {
+	// Given: an unreachable backend and a proxy with an ActivityRecorder
+	recorder := &mockActivityRecorder{}
+	proxy := NewProxyHandler("http://127.0.0.1:1", newTestLogger(), WithActivityRecorder(recorder, "error-route"))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+
+	// When: a request is served (backend will fail)
+	proxy.ServeHTTP(w, r)
+
+	// Then: RecordActivity was called before proxying (even on error)
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Equal(t, 1, recorder.callCount())
+	assert.Equal(t, "error-route", recorder.lastRouteID())
+}
+
+// TestProxyHandlerWithActivityRecorderRecordsBeforeProxying verifies that
+// RecordActivity is called before the request reaches the backend.
+func TestProxyHandlerWithActivityRecorderRecordsBeforeProxying(t *testing.T) {
+	// Given: a backend that checks a flag set by RecordActivity
+	activityRecordedBeforeBackend := false
+	recorder := &mockActivityRecorder{}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// When this handler runs, RecordActivity must already have been called
+		activityRecordedBeforeBackend = recorder.callCount() > 0
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	proxy := NewProxyHandler(backend.URL, newTestLogger(), WithActivityRecorder(recorder, "order-route"))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+
+	// When: a request is served
+	proxy.ServeHTTP(w, r)
+
+	// Then: activity was recorded before the backend handled the request
+	assert.True(t, activityRecordedBeforeBackend, "RecordActivity must be called before proxying")
+}
+
+// TestProxyHandlerWithActivityRecorderRecordsOnMultipleRequests verifies that
+// RecordActivity is called once per request, not just once total.
+func TestProxyHandlerWithActivityRecorderRecordsOnMultipleRequests(t *testing.T) {
+	// Given: a backend and a proxy with an ActivityRecorder
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	recorder := &mockActivityRecorder{}
+	proxy := NewProxyHandler(backend.URL, newTestLogger(), WithActivityRecorder(recorder, "multi-route"))
+
+	// When: three requests are served
+	for range 3 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		proxy.ServeHTTP(w, r)
+	}
+
+	// Then: RecordActivity was called exactly three times
+	assert.Equal(t, 3, recorder.callCount())
+}
+
+// TestProxyHandlerWithoutActivityRecorderWorksNormally verifies that when no
+// ActivityRecorder is provided, the proxy handler behaves exactly as before.
+func TestProxyHandlerWithoutActivityRecorderWorksNormally(t *testing.T) {
+	// Given: a backend and a proxy without an ActivityRecorder
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	proxy := NewProxyHandler(backend.URL, newTestLogger())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+
+	// When: a request is served (no recorder, should not panic)
+	require.NotPanics(t, func() {
+		proxy.ServeHTTP(w, r)
+	})
+
+	// Then: request handled normally
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ok", w.Body.String())
+}
+
+// TestProxyHandlerWithActivityRecorderInvalidURLStillRecords verifies that
+// RecordActivity is called even when the target URL is invalid and the handler
+// returns 502 immediately (before proxying).
+func TestProxyHandlerWithActivityRecorderInvalidURLStillRecords(t *testing.T) {
+	// Given: an invalid target URL and an ActivityRecorder
+	recorder := &mockActivityRecorder{}
+	proxy := NewProxyHandler("http://", newTestLogger(), WithActivityRecorder(recorder, "invalid-route"))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+
+	// When: a request is served
+	proxy.ServeHTTP(w, r)
+
+	// Then: 502 is returned (invalid host) and RecordActivity was still called
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Equal(t, 1, recorder.callCount())
+	assert.Equal(t, "invalid-route", recorder.lastRouteID())
 }

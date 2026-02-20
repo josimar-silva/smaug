@@ -14,9 +14,11 @@ import (
 
 	sleepclient "github.com/josimar-silva/smaug/internal/client/sleep"
 	"github.com/josimar-silva/smaug/internal/config"
+	"github.com/josimar-silva/smaug/internal/health"
 	"github.com/josimar-silva/smaug/internal/infrastructure/logger"
 	"github.com/josimar-silva/smaug/internal/infrastructure/metrics"
 	"github.com/josimar-silva/smaug/internal/proxy"
+	"github.com/josimar-silva/smaug/internal/store"
 )
 
 // newTestLogger returns a test logger that writes to a discard sink.
@@ -331,9 +333,10 @@ func TestInitSleepCoordinatorReturnsNilWhenIdleTrackerIsNil(t *testing.T) {
 	// Given: nil idle tracker
 	cfg := &config.Config{}
 	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
 
 	// When
-	coordinator, err := initSleepCoordinator(cfg, nil, log)
+	coordinator, err := initSleepCoordinator(cfg, nil, healthStore, log)
 
 	// Then: no coordinator, no error
 	assert.NoError(t, err)
@@ -357,13 +360,14 @@ func TestInitSleepCoordinatorReturnsNilWhenNoEndpointConfigured(t *testing.T) {
 		},
 	}
 	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
 
 	// Build a real IdleTracker so the function doesn't early-exit on nil check.
 	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
 	require.NoError(t, err)
 
 	// When
-	coordinator, err := initSleepCoordinator(cfg, tracker, log)
+	coordinator, err := initSleepCoordinator(cfg, tracker, healthStore, log)
 
 	// Then: no coordinator (all endpoints empty), no error
 	assert.NoError(t, err)
@@ -390,12 +394,13 @@ func TestInitSleepCoordinatorSucceedsWithValidEndpoint(t *testing.T) {
 		},
 	}
 	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
 
 	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
 	require.NoError(t, err)
 
 	// When
-	coordinator, err := initSleepCoordinator(cfg, tracker, log)
+	coordinator, err := initSleepCoordinator(cfg, tracker, healthStore, log)
 
 	// Then: coordinator is returned, no error
 	require.NoError(t, err)
@@ -420,12 +425,13 @@ func TestInitSleepCoordinatorReturnsErrorOnInvalidEndpoint(t *testing.T) {
 		},
 	}
 	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
 
 	tracker, err := proxy.NewIdleTracker(proxy.IdleTrackerConfig{CheckInterval: time.Second}, log)
 	require.NoError(t, err)
 
 	// When
-	coordinator, err := initSleepCoordinator(cfg, tracker, log)
+	coordinator, err := initSleepCoordinator(cfg, tracker, healthStore, log)
 
 	// Then: error about client creation, no coordinator
 	assert.Error(t, err)
@@ -447,9 +453,15 @@ func TestRouteSleepSenderDispatchesCommandToRegisteredRoute(t *testing.T) {
 	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
 	require.NoError(t, err)
 
+	healthStore := store.NewInMemoryHealthStore()
+	// Mark server as healthy so sleep command is attempted
+	healthStore.Update("server1", health.ServerHealthStatus{ServerID: "server1", Healthy: true})
+
 	sender := &routeSleepSender{
-		senders: map[string]*sleepclient.Client{"route1": client},
-		log:     log,
+		senders:     map[string]*sleepclient.Client{"route1": client},
+		serverIDs:   map[string]string{"route1": "server1"},
+		healthStore: healthStore,
+		log:         log,
 	}
 
 	// Use a short timeout so the test doesn't wait for a network timeout.
@@ -470,8 +482,10 @@ func TestRouteSleepSenderSkipsUnknownRoute(t *testing.T) {
 	// Given: a routeSleepSender with an empty senders map
 	log := newTestLogger(t)
 	sender := &routeSleepSender{
-		senders: make(map[string]*sleepclient.Client),
-		log:     log,
+		senders:     make(map[string]*sleepclient.Client),
+		serverIDs:   make(map[string]string),
+		healthStore: store.NewInMemoryHealthStore(),
+		log:         log,
 	}
 
 	// When: Sleep called for an unknown route
@@ -492,15 +506,77 @@ func TestRouteSleepSenderForwardsErrorFromClient(t *testing.T) {
 	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
 	require.NoError(t, err)
 
+	healthStore := store.NewInMemoryHealthStore()
+	// Mark server as healthy so sleep command is attempted
+	healthStore.Update("server1", health.ServerHealthStatus{ServerID: "server1", Healthy: true})
+
 	sender := &routeSleepSender{
-		senders: map[string]*sleepclient.Client{"route1": client},
-		log:     log,
+		senders:     map[string]*sleepclient.Client{"route1": client},
+		serverIDs:   map[string]string{"route1": "server1"},
+		healthStore: healthStore,
+		log:         log,
 	}
 
 	// When: Sleep is called for route1 (network error expected)
 	err = sender.Sleep(context.Background(), "route1")
 
 	// Then: network error propagated from the sleep client
+	assert.Error(t, err)
+}
+
+// TestRouteSleepSenderSkipsSleepWhenServerOffline verifies that Sleep is a no-op
+// when the server is marked as unhealthy in the health store.
+func TestRouteSleepSenderSkipsSleepWhenServerOffline(t *testing.T) {
+	// Given: a route with a registered client and unhealthy server
+	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
+
+	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
+	require.NoError(t, err)
+
+	sender := &routeSleepSender{
+		senders:     map[string]*sleepclient.Client{"route1": client},
+		serverIDs:   map[string]string{"route1": "server1"},
+		healthStore: healthStore,
+		log:         log,
+	}
+
+	// Mark server as unhealthy
+	healthStore.Update("server1", health.ServerHealthStatus{ServerID: "server1", Healthy: false})
+
+	// When: Sleep is called for route1
+	err = sender.Sleep(context.Background(), "route1")
+
+	// Then: no error (sleep command skipped, not attempted)
+	assert.NoError(t, err)
+}
+
+// TestRouteSleepSenderSendsSleepWhenServerOnline verifies that Sleep forwards
+// to the client when the server is marked as healthy.
+func TestRouteSleepSenderSendsSleepWhenServerOnline(t *testing.T) {
+	// Given: a route with a registered client and healthy server
+	log := newTestLogger(t)
+	healthStore := store.NewInMemoryHealthStore()
+
+	client, err := sleepclient.NewClient(sleepclient.NewClientConfig("http://no-such-host.invalid/sleep"), log)
+	require.NoError(t, err)
+
+	sender := &routeSleepSender{
+		senders:     map[string]*sleepclient.Client{"route1": client},
+		serverIDs:   map[string]string{"route1": "server1"},
+		healthStore: healthStore,
+		log:         log,
+	}
+
+	// Mark server as healthy
+	healthStore.Update("server1", health.ServerHealthStatus{ServerID: "server1", Healthy: true})
+
+	// When: Sleep is called with short timeout to avoid waiting
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = sender.Sleep(ctx, "route1")
+
+	// Then: error from network call (proving sleep was attempted, not skipped)
 	assert.Error(t, err)
 }
 

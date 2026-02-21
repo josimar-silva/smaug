@@ -23,7 +23,7 @@
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go" alt="Go"></a>
   <!-- Version -->
   <a href="./">
-    <img src="https://img.shields.io/badge/smaug-v0.2.0-orange.svg" alt="smaug" />
+    <img src="https://img.shields.io/badge/smaug-v0.2.1-orange.svg" alt="smaug" />
   </a>
   <!-- Go Report Card -->
   <a href="https://goreportcard.com/report/github.com/josimar-silva/smaug">

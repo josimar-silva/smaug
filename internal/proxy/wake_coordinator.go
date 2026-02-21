@@ -192,7 +192,8 @@ func validateWakeCoordinatorConfig(
 }
 
 func (c *WakeCoordinator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if c.healthStore.Get(c.serverID).Healthy {
+	status, found := c.healthStore.Get(c.serverID)
+	if found && status.Healthy {
 		c.downstream.ServeHTTP(w, r)
 		return
 	}
@@ -311,7 +312,8 @@ func (c *WakeCoordinator) pollUntilHealthyWithContext(ctx context.Context) error
 			return fmt.Errorf("%w: coordinator closed", ErrWakeTimeout)
 
 		case <-ticker.C:
-			if c.healthStore.Get(c.serverID).Healthy {
+			status, found := c.healthStore.Get(c.serverID)
+			if found && status.Healthy {
 				c.logger.InfoContext(ctx, "server became healthy",
 					"server_id", c.serverID,
 				)

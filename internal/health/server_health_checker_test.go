@@ -31,18 +31,12 @@ func newMockHealthStore() *mockHealthStore {
 	}
 }
 
-func (m *mockHealthStore) Get(serverID string) ServerHealthStatus {
+func (m *mockHealthStore) Get(serverID string) (ServerHealthStatus, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	status, exists := m.statuses[serverID]
-	if !exists {
-		return ServerHealthStatus{
-			ServerID: serverID,
-			Healthy:  false,
-		}
-	}
-	return status
+	return status, exists
 }
 
 func (m *mockHealthStore) Update(serverID string, status ServerHealthStatus) {
@@ -177,7 +171,7 @@ func TestServerHealthCheckerCheckSuccess(t *testing.T) {
 	assert.False(t, status.LastCheckedAt.IsZero())
 
 	// And: the store should be updated
-	storedStatus := store.Get("saruman")
+	storedStatus, _ := store.Get("saruman")
 	assert.True(t, storedStatus.Healthy)
 	assert.Equal(t, status.LastCheckedAt, storedStatus.LastCheckedAt)
 }
@@ -207,7 +201,7 @@ func TestServerHealthCheckerCheckFailure(t *testing.T) {
 	assert.Contains(t, status.LastError, "500")
 
 	// And: the store should be updated with unhealthy status
-	storedStatus := store.Get("saruman")
+	storedStatus, _ := store.Get("saruman")
 	assert.False(t, storedStatus.Healthy)
 	assert.NotEmpty(t, storedStatus.LastError)
 }
@@ -231,7 +225,7 @@ func TestServerHealthCheckerCheckNetworkError(t *testing.T) {
 	assert.NotEmpty(t, status.LastError)
 
 	// And: the store should be updated
-	storedStatus := store.Get("saruman")
+	storedStatus, _ := store.Get("saruman")
 	assert.False(t, storedStatus.Healthy)
 }
 
@@ -259,7 +253,7 @@ func TestServerHealthCheckerCheckContextCancellation(t *testing.T) {
 	assert.False(t, status.Healthy)
 
 	// And: the store should be updated
-	storedStatus := store.Get("saruman")
+	storedStatus, _ := store.Get("saruman")
 	assert.False(t, storedStatus.Healthy)
 }
 
@@ -322,7 +316,7 @@ func TestServerHealthCheckerCheckTransitionFromHealthyToUnhealthy(t *testing.T) 
 	assert.NotEmpty(t, status2.LastError)
 
 	// Then: store should reflect the unhealthy state
-	storedStatus := store.Get("saruman")
+	storedStatus, _ := store.Get("saruman")
 	assert.False(t, storedStatus.Healthy)
 	assert.NotEmpty(t, storedStatus.LastError)
 }

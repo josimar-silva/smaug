@@ -232,7 +232,7 @@ func (m *HealthManager) performCheck(ctx context.Context, worker *serverWorker) 
 	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 
-	prevStatus := m.store.Get(worker.serverID)
+	prevStatus, _ := m.store.Get(worker.serverID)
 	newStatus, err := worker.checker.Check(checkCtx)
 
 	m.logStateTransition(worker.serverID, prevStatus, newStatus, err)

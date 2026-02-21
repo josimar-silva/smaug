@@ -22,22 +22,14 @@ func NewInMemoryHealthStore() *InMemoryHealthStore {
 }
 
 // Get retrieves the current health status for a server.
-// If the server has never been checked, returns a default ServerHealthStatus with Healthy=false.
+// Returns (status, true) if the server has been health-checked, (zero-value, false) otherwise.
 // This method is safe for concurrent reads.
-func (s *InMemoryHealthStore) Get(serverID string) health.ServerHealthStatus {
+func (s *InMemoryHealthStore) Get(serverID string) (health.ServerHealthStatus, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	status, exists := s.health[serverID]
-	if !exists {
-		// Return unhealthy status for unknown servers (fail-safe default)
-		return health.ServerHealthStatus{
-			ServerID: serverID,
-			Healthy:  false,
-		}
-	}
-
-	return status
+	return status, exists
 }
 
 // Update stores a new health status for a server.

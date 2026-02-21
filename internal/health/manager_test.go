@@ -241,7 +241,8 @@ func TestHealthManagerWorkerPolling(t *testing.T) {
 	assert.GreaterOrEqual(t, int(requestCount.Load()), 3, "should have polled at least 3 times")
 
 	// And: store should be updated with healthy status
-	status := store.Get("test-server")
+	status, found := store.Get("test-server")
+	assert.True(t, found, "status should be found in store")
 	assert.True(t, status.Healthy)
 	assert.False(t, status.LastCheckedAt.IsZero())
 
@@ -334,10 +335,12 @@ func TestHealthManagerMultipleWorkers(t *testing.T) {
 	assert.Len(t, manager.workers, 2)
 
 	// And: each should have updated the store
-	healthyStatus := store.Get("healthy-server")
+	healthyStatus, found := store.Get("healthy-server")
+	assert.True(t, found, "healthy-server should be found")
 	assert.True(t, healthyStatus.Healthy)
 
-	unhealthyStatus := store.Get("unhealthy-server")
+	unhealthyStatus, found := store.Get("unhealthy-server")
+	assert.True(t, found, "unhealthy-server should be found")
 	assert.False(t, unhealthyStatus.Healthy)
 	assert.NotEmpty(t, unhealthyStatus.LastError)
 
@@ -381,7 +384,7 @@ func TestHealthManagerStateTransitions(t *testing.T) {
 
 	// Wait for initial healthy state
 	time.Sleep(100 * time.Millisecond)
-	status1 := store.Get("test-server")
+	status1, _ := store.Get("test-server")
 	assert.True(t, status1.Healthy)
 
 	// When: backend becomes unhealthy
@@ -389,7 +392,7 @@ func TestHealthManagerStateTransitions(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Then: store should reflect unhealthy state
-	status2 := store.Get("test-server")
+	status2, _ := store.Get("test-server")
 	assert.False(t, status2.Healthy)
 	assert.NotEmpty(t, status2.LastError)
 	assert.True(t, status2.LastCheckedAt.After(status1.LastCheckedAt))
@@ -399,7 +402,7 @@ func TestHealthManagerStateTransitions(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Then: store should reflect healthy state again
-	status3 := store.Get("test-server")
+	status3, _ := store.Get("test-server")
 	assert.True(t, status3.Healthy)
 	assert.Empty(t, status3.LastError)
 
@@ -438,7 +441,7 @@ func TestHealthManagerImmediateInitialCheck(t *testing.T) {
 
 	// Then: should have performed initial check almost immediately
 	time.Sleep(50 * time.Millisecond)
-	status := store.Get("test-server")
+	status, _ := store.Get("test-server")
 	assert.False(t, status.LastCheckedAt.IsZero(), "should have performed initial check")
 
 	// Cleanup

@@ -18,8 +18,8 @@ type ServerHealthStatus struct {
 // HealthStore provides thread-safe access to server health status.
 type HealthStore interface {
 	// Get retrieves the current health status for a server.
-	// Returns a ServerHealthStatus with Healthy=false if the server has never been checked.
-	Get(serverID string) ServerHealthStatus
+	// Returns (status, true) if the server has been health-checked, (zero-value, false) otherwise.
+	Get(serverID string) (ServerHealthStatus, bool)
 
 	// Update stores a new health status for a server.
 	// This operation is atomic and thread-safe.

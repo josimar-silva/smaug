@@ -31,6 +31,11 @@ const defaultIdleCheckInterval = time.Minute
 // during graceful shutdown. This aligns with Kubernetes pod termination grace period.
 const gracefulShutdownTimeout = 30 * time.Second
 
+// HealthStatusGetter retrieves the health status of a server by ID.
+type HealthStatusGetter interface {
+	Get(serverID string) (health.ServerHealthStatus, bool)
+}
+
 // routeSleepSender implements proxy.SleepSender by dispatching sleep commands to
 // the correct upstream endpoint based on the route identifier.
 //
@@ -41,7 +46,7 @@ type routeSleepSender struct {
 	senders map[string]*sleepclient.Client
 	// serverIDs maps route name to server ID for health lookups.
 	serverIDs   map[string]string
-	healthStore *store.InMemoryHealthStore
+	healthStore HealthStatusGetter
 	log         *logger.Logger
 }
 
@@ -51,14 +56,21 @@ func (r *routeSleepSender) Sleep(ctx context.Context, routeID string) error {
 	// Check if server is healthy before sending sleep command
 	serverID, ok := r.serverIDs[routeID]
 	if ok && r.healthStore != nil {
-		status := r.healthStore.Get(serverID)
-		if !status.Healthy {
+		status, found := r.healthStore.Get(serverID)
+		if found && !status.Healthy {
 			r.log.InfoContext(ctx, "server already offline, skipping sleep command",
 				"operation", "route_sleep_sender",
 				"route_id", routeID,
 				"server_id", serverID,
 			)
 			return nil
+		}
+		if !found {
+			r.log.WarnContext(ctx, "server health status not yet available, proceeding with sleep",
+				"operation", "route_sleep_sender",
+				"route_id", routeID,
+				"server_id", serverID,
+			)
 		}
 	}
 
@@ -166,7 +178,7 @@ func initIdleTracker(cfg *config.Config, m *metrics.Registry, log *logger.Logger
 func initSleepCoordinator(
 	cfg *config.Config,
 	idleTracker *proxy.IdleTracker,
-	healthStore *store.InMemoryHealthStore,
+	healthStore HealthStatusGetter,
 	log *logger.Logger,
 ) (*proxy.SleepCoordinator, error) {
 	if idleTracker == nil {

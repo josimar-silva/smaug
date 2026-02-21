@@ -59,10 +59,11 @@ func newFakeHealthStore(healthy bool) *fakeHealthStore {
 	return s
 }
 
-func (s *fakeHealthStore) Get(serverID string) health.ServerHealthStatus {
+func (s *fakeHealthStore) Get(serverID string) (health.ServerHealthStatus, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.status[serverID]
+	status, exists := s.status[serverID]
+	return status, exists
 }
 
 func (s *fakeHealthStore) Update(serverID string, status health.ServerHealthStatus) {

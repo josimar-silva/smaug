@@ -10,17 +10,18 @@ import (
 	"github.com/josimar-silva/smaug/internal/health"
 )
 
-// TestInMemoryHealthStore_Get_UnknownServer tests that Get returns unhealthy default for unknown servers.
+// TestInMemoryHealthStore_Get_UnknownServer tests that Get returns (zero-value, false) for unknown servers.
 func TestInMemoryHealthStoreGetUnknownServer(t *testing.T) {
 	// Given: an empty health store
 	store := NewInMemoryHealthStore()
 
 	// When: getting status for a server that has never been checked
-	status := store.Get("unknown-server")
+	status, found := store.Get("unknown-server")
 
-	// Then: should return default unhealthy status
-	assert.Equal(t, "unknown-server", status.ServerID)
-	assert.False(t, status.Healthy, "unknown server should be unhealthy by default")
+	// Then: should return zero-value status with found=false
+	assert.False(t, found, "unknown server should not be found")
+	assert.Empty(t, status.ServerID, "zero-value status should have empty ServerID")
+	assert.False(t, status.Healthy, "zero-value status should have Healthy=false")
 	assert.Empty(t, status.LastError)
 	assert.True(t, status.LastCheckedAt.IsZero(), "timestamp should be zero value")
 }
@@ -41,7 +42,8 @@ func TestInMemoryHealthStoreUpdateNewServer(t *testing.T) {
 	store.Update("saruman", status)
 
 	// Then: the status should be retrievable
-	retrieved := store.Get("saruman")
+	retrieved, found := store.Get("saruman")
+	assert.True(t, found, "server should be found after Update")
 	assert.Equal(t, "saruman", retrieved.ServerID)
 	assert.True(t, retrieved.Healthy)
 	assert.Equal(t, now, retrieved.LastCheckedAt)
@@ -70,7 +72,8 @@ func TestInMemoryHealthStoreUpdateExistingServer(t *testing.T) {
 	})
 
 	// Then: the new status should overwrite the old one
-	retrieved := store.Get("saruman")
+	retrieved, found := store.Get("saruman")
+	assert.True(t, found, "server should be found after Update")
 	assert.Equal(t, "saruman", retrieved.ServerID)
 	assert.False(t, retrieved.Healthy, "should have updated to unhealthy")
 	assert.Equal(t, secondTime, retrieved.LastCheckedAt)
@@ -157,11 +160,13 @@ func TestInMemoryHealthStoreGetAllReturnsSnapshot(t *testing.T) {
 	}
 
 	// Then: the store should not be affected
-	storedStatus := store.Get("saruman")
+	storedStatus, found := store.Get("saruman")
+	assert.True(t, found, "saruman should exist in store")
 	assert.True(t, storedStatus.Healthy, "store should still have original status")
 
-	newServerStatus := store.Get("new-server")
-	assert.False(t, newServerStatus.Healthy, "new server should not exist in store")
+	newServerStatus, found := store.Get("new-server")
+	assert.False(t, found, "new server should not exist in store")
+	assert.False(t, newServerStatus.Healthy, "zero-value status should have Healthy=false")
 }
 
 // TestInMemoryHealthStore_ConcurrentReads tests that concurrent reads don't cause data races.
@@ -182,7 +187,7 @@ func TestInMemoryHealthStoreConcurrentReads(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			serverID := "server" + string(rune('0'+n%10))
-			_ = store.Get(serverID)
+			_, _ = store.Get(serverID)
 		}(i)
 	}
 
@@ -237,7 +242,7 @@ func TestInMemoryHealthStoreConcurrentReadWrite(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				serverID := "server" + string(rune('0'+j%5))
-				_ = store.Get(serverID)
+				_, _ = store.Get(serverID)
 			}
 		}()
 	}

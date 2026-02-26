@@ -96,7 +96,7 @@ jobs:
         run: just test
 
       - name: ⬆️ Upload coverage report
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: test-coverage
           path: coverage.out
@@ -141,7 +141,7 @@ jobs:
         run: just benchmark
 
       - name: ⬆️ Upload benchmark results
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: benchmark-results
           path: benchmark-results.txt
@@ -231,7 +231,7 @@ jobs:
         run: just build-release ${{ steps.get_version.outputs.VERSION }}
 
       - name: ⬆️ Upload binary artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: smaug-${{ github.sha }}
           path: bin/smaug
@@ -304,7 +304,7 @@ jobs:
           just-version: "1.40.0"
 
       - name: ⬇️ Download test coverage report
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
         with:
           name: test-coverage
           path: ./

@@ -36,7 +36,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just
@@ -81,7 +81,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just
@@ -126,7 +126,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just
@@ -172,7 +172,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just
@@ -212,7 +212,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just
@@ -256,7 +256,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: 🔒 Run Gosec Security Scanner
@@ -295,7 +295,7 @@ jobs:
       - name: 🐹 Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.0'
+          go-version: '1.26.1'
           cache: true
 
       - name: ⚒️ Setup just

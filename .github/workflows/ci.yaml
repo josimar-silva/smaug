@@ -265,7 +265,7 @@ jobs:
           args: '-no-fail -fmt sarif -out results.sarif ./...'
 
       - name: ⬆️ Upload SARIF file
-        uses: github/codeql-action/upload-sarif@30c555a528e360aaf7570127a2440e1396c211cb
+        uses: github/codeql-action/upload-sarif@510cf736e330d7eb9bc471636d65aaa180118824
         with:
           sarif_file: results.sarif
 

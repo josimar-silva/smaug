@@ -13,7 +13,7 @@ permissions:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: 🛡️ Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -58,7 +58,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: 🛡️ Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -103,7 +103,7 @@ jobs:
 
   benchmark:
     name: Benchmark
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: 🛡️ Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -148,7 +148,7 @@ jobs:
 
   integration-test:
     name: Integration Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [check]
     steps:
       - name: 🛡️ Harden the runner
@@ -189,7 +189,7 @@ jobs:
   build:
     needs: [test, integration-test, check, benchmark]
     name: Build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: 🛡️ Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -238,7 +238,7 @@ jobs:
 
   security:
     name: Security Scan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       security-events: write
       contents: read
@@ -272,7 +272,7 @@ jobs:
   sonar:
     needs: [test, integration-test, check, build]
     name: Sonar Analysis
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: 🛡️ Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
